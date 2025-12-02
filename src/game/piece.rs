@@ -1,4 +1,4 @@
-use crate::color::Color;
+use super::color::Color;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Piece {
@@ -19,7 +19,4 @@ impl Piece {
     pub fn color(&self) -> Color {
         self.color
     }
-}    
-
-    
-
+}

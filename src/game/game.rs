@@ -1,9 +1,9 @@
-use crate::piece::*;
-use crate::action::*;
-use crate::color::*;
-use crate::deck::*;
-use crate::card::*;
-use crate::player::*;
+use super::piece::*;
+use super::action::*;
+use super::color::*;
+use super::deck::*;
+use super::card::*;
+use super::player::*;
 
 const CARDS_PER_ROUND: [u8;4] = [5,4,3,2];
 
@@ -47,7 +47,7 @@ pub trait DogGame {
     fn new_round(&mut self);
     
     // Is called by new_round() and swaps two cards in between team members
-    fn swap(&mut self)-> &mut Self; 
+    fn swap_cards(&mut self)-> &mut Self; 
 
     // Checks if there is yet a winning team
     fn is_winner(&self) -> bool;
@@ -111,12 +111,12 @@ impl DogGame for Game {
             self.yellow.cards.push(self.deck.draw().unwrap());
         }
 
-        self.swap();
+        self.swap_cards();
         
         self.round += 1;
     }
     
-    fn swap(&mut self)-> &mut Self {
+    fn swap_cards(&mut self)-> &mut Self {
         todo!()
     }
     

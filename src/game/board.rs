@@ -1,4 +1,4 @@
-use crate::color::Color;
+use super::color::Color;
 
 pub type Point = usize; // 0-79
 

@@ -1,7 +1,7 @@
 use rand::seq::SliceRandom;
 use rand::rng;
 
-use crate::card::Card;
+use super::card::Card;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Deck {
@@ -61,5 +61,18 @@ impl Deck {
     pub fn shuffle(&mut self) {
         self.cards.shuffle(&mut rng());
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Deck;
+    use crate::game::card::Card;
+
+    #[test]
+    fn test_deck_creation() {
+        let deck = Deck::new();
+        assert_eq!(deck.len(), 108); // 2 decks of 54 cards each
+    }
+
 
 }

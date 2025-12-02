@@ -1,6 +1,6 @@
-use crate::player::Player;
-use crate::card::Card;
-use crate::board::Point;
+use super::player::Player;
+use super::card::Card;
+use super::board::Point;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Action {

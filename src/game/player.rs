@@ -1,5 +1,5 @@
-use crate::color::Color;
-use crate::card::Card;
+use super::color::Color;
+use super::card::Card;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Player {
