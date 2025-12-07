@@ -1,3 +1,8 @@
+use core::error;
+
+use crate::game::card;
+use crate::game::player;
+
 use super::piece::*;
 use super::action::*;
 use super::color::*;
@@ -21,6 +26,8 @@ pub struct Game {
     yellow: Player,
 
     current_player_color: Color,
+    swapping_phase: bool,
+    swap_buffer: Vec<(Player, Card)>
 }
 
 
@@ -35,7 +42,7 @@ pub trait DogGame {
     fn current_player(&self) -> &Player;
 
     // Matches and applies the action of playing the given card for the current player
-    fn action(&mut self, card: Card) -> Result<(), &'static str>;
+    fn action(&mut self, action: Action) -> Result<(), &'static str>;
 
     // Undoes the last action
     fn undo(&mut self) -> Result<(), &'static str>;
@@ -69,6 +76,8 @@ impl DogGame for Game {
             yellow: Player::new(Color::Yellow),
 
             current_player_color: Color::Red,
+            swapping_phase: true,
+            swap_buffer: Vec::new(),
         }
     }
 
@@ -85,8 +94,38 @@ impl DogGame for Game {
         &self.board
     }
 
-    fn action(&mut self, _card: Card) -> Result<(), &'static str> {
-        todo!()
+    fn action(&mut self, mut action: Action) -> Result<(), &'static str> {
+        match action.action{
+            ActionKind::Place => todo!(),
+            ActionKind::Move(_, _) => todo!(),
+            ActionKind::Switch(_, _) => todo!(),
+            ActionKind::Swap(card_index) => {
+                if action.player.swapped_cards_count == self.round{
+                    if self.swapping_phase{
+                        if self.swap_buffer.iter().any(|(p, _)| *p == action.player){
+                            return Err("Es darf pro Spieler nur eine Karte getauscht werden")
+                        }
+                        
+                        self.swap_buffer.push((action.player, *action.player.cards.get(card_index).expect("Spieler hat weniger Karten als die angegeben anzahl")));
+                        action.player.cards.remove(card_index);
+                        if self.swap_buffer.len()==4 {
+                                for (p, c) in self.swap_buffer.drain(..){
+                                    match p.teammate() {
+                                        Color::Red => self.red.cards.push(c),
+                                        Color::Green => self.green.cards.push(c),
+                                        Color::Blue => self.blue.cards.push(c),
+                                        Color::Yellow => self.yellow.cards.push(c),
+                                    }
+                                }  
+                            self.swapping_phase = false;
+                            return Ok(())
+                        }
+                    }else {
+                        return  Err("In dieser Phase des Spiels dürfen keine Karten getauscht werden");
+                    }
+                } else  {return  Err("Dieser Spieler darf keine Karte tauschen") };
+            Ok(())},
+        }
     }
     
     fn undo(&mut self) -> Result<(), &'static str> {

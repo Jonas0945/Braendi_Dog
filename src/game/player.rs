@@ -7,6 +7,7 @@ pub struct Player {
     pub pieces_to_place: u8,
     pub pieces_in_house: u8,
     pub cards: Vec<Card>, 
+    pub swapped_cards_count: u8,
 }
 
 impl Player {
@@ -16,6 +17,7 @@ impl Player {
             pieces_to_place: 4,
             pieces_in_house: 0,
             cards: Vec::new(),
+            swapped_cards_count: 0,
         }
     }
     
