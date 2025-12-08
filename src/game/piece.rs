@@ -19,4 +19,8 @@ impl Piece {
     pub fn color(&self) -> Color {
         self.color
     }
+
+    pub fn id(&self) -> u8 {
+        self.id
+    }
 }
