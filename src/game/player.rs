@@ -37,4 +37,10 @@ impl Player {
         }
     }
 
+    pub fn remove_card(&mut self, card: Card) {
+        if let Some(i) = self.cards.iter().position(|&c| c == card) {
+            self.cards.remove(i);
+        }
+    }
+
 }

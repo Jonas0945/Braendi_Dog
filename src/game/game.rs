@@ -4,12 +4,14 @@ use super::color::*;
 use super::deck::*;
 use super::card::*;
 use super::player::*;
+use super::board::*;
+use super::history::*;
 
 const CARDS_PER_ROUND: [u8;4] = [5,4,3,2];
 
 pub struct Game {
-    board: [Option<Piece>; 80],
-    history: Vec<Action>,
+    board: Board,
+    history: Vec<HistoryEntry>,
     round: u8,
 
     deck: Deck,
@@ -35,7 +37,7 @@ pub trait DogGame {
     fn current_player(&self) -> &Player;
 
     // Matches and applies the action of playing the given card for the current player
-    fn action(&mut self, card: Card) -> Result<(), &'static str>;
+    fn action(&mut self, card: Card, action: Action) -> Result<(), &'static str>;
 
     // Undoes the last action
     fn undo(&mut self) -> Result<(), &'static str>;
@@ -56,7 +58,7 @@ pub trait DogGame {
 impl DogGame for Game {
     fn new() -> Self {
         Self {
-            board: [None; 80],
+            board: Board::new(),
             history: Vec::new(),
             round: 0,
 
@@ -82,11 +84,65 @@ impl DogGame for Game {
     }
     
     fn board_state(&self) -> &[Option<Piece>; 80] {
-        &self.board
+        &self.board.tiles
     }
 
-    fn action(&mut self, _card: Card) -> Result<(), &'static str> {
-        todo!()
+    fn action(&mut self, _card: Card, _action: Action) -> Result<(), &'static str> {
+        match _action.action {
+            ActionKind::Place => {
+
+                match _card {
+                    Card::Ace | Card::King | Card::Joker => {}
+                    _ => return Err("Cannot place piece with this card."),
+                }
+
+                let color = self.current_player_color;
+                let start = Board::start_field(color) as usize;
+
+                let mut beaten_piece_color: Option<Color> = None;
+
+                if let Some(piece) = self.board.tiles[start].take() {
+                    if piece.color == color && !piece.left_start {
+                        self.board.tiles[start] = Some(piece);
+                        return Err("Cannot place piece: your protected piece is blocking.");
+                    } else {
+                        beaten_piece_color = Some(piece.color);
+                        match piece.color {
+                            Color::Red => self.red.pieces_to_place += 1,
+                            Color::Green => self.green.pieces_to_place += 1,
+                            Color::Blue => self.blue.pieces_to_place += 1,
+                            Color::Yellow => self.yellow.pieces_to_place += 1,
+                        }
+                    }
+                }
+
+                self.board.tiles[start] = Some (Piece::new(color));
+
+                 let player_cards = match color {
+                    Color::Red => &mut self.red.cards,
+                    Color::Green => &mut self.green.cards,
+                    Color::Blue => &mut self.blue.cards,
+                    Color::Yellow => &mut self.yellow.cards,
+                };
+
+                if let Some(index) = player_cards.iter().position(|&c| c == _card) {
+                    player_cards.remove(index);
+                }
+
+                self.discard.push(_card);
+
+                self.history.push(HistoryEntry {
+                    action: _action,
+                    beaten_piece_color,
+                    switched_piece_color: None,
+                });
+
+                Ok(())
+            }
+
+            ActionKind::Move(_, _) => todo!(),
+            ActionKind::Switch(_, _) => todo!(),
+        }
     }
     
     fn undo(&mut self) -> Result<(), &'static str> {

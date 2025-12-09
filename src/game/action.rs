@@ -1,12 +1,12 @@
-use super::player::Player;
 use super::card::Card;
 use super::board::Point;
+use super::color::Color;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Action {
-    player: Player,
-    card: Card,
-    action: ActionKind,
+    pub player: Color,
+    pub card: Card,
+    pub action: ActionKind,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
