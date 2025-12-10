@@ -64,12 +64,12 @@ impl Board {
         self.tiles[p as usize]
     }
 
-    pub fn start(&mut self, piece: Piece) -> Option<Piece> {
+   /*ub fn start(&mut self, piece: Piece) -> Option<Piece> {
         let entry = house_entry_for(piece.color()); 
         let old = self.tiles[entry as usize];
         self.tiles[entry as usize] = Some(piece);
         old
-    }
+    }*/
 
     pub fn start_field(color: Color) -> Point {
         match color {

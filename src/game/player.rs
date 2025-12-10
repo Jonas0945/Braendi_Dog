@@ -18,15 +18,6 @@ impl Player {
             cards: Vec::new(),
         }
     }
-    
-    pub fn next(&self) -> Color {
-        match self.color {
-            Color::Red => Color::Green,
-            Color::Green => Color::Blue,
-            Color::Blue => Color::Yellow,
-            Color::Yellow => Color::Red,
-        }
-    }
 
     pub fn teammate(&self) -> Color {
         match self.color {

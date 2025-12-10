@@ -107,17 +107,17 @@ impl DogGame for Game {
                     _ => return Err("Cannot place piece with this card."),
                 }
                 
-                let color = self.current_player_color;
-                let start = Board::start_field(color) as usize;
+                let current_player_color = self.current_player_color;
+                let start = Board::start_field(current_player_color) as usize;
 
-                if self.player_mut_by_color(color).pieces_to_place == 0 {
+                if self.current_player().pieces_to_place == 0 {
                     return Err("Cannot place piece: no pieces left to place.");
                 }
 
                 let mut beaten_piece_color = None;
 
                 if let Some(piece) = self.board.tiles[start].take() {
-                    if piece.color == color && !piece.left_start {
+                    if piece.color == current_player_color && !piece.left_start {
                         self.board.tiles[start] = Some(piece);
                         return Err("Cannot place piece: your protected piece is blocking.")
                     }
@@ -128,9 +128,9 @@ impl DogGame for Game {
                     self.player_mut_by_color(beaten_color).pieces_to_place += 1;
                 }
 
-                self.board.tiles[start] = Some (Piece::new(color));
+                self.board.tiles[start] = Some (Piece::new(current_player_color));
 
-                self.player_mut_by_color(color).remove_card(_card);
+                self.player_mut_by_color(current_player_color).remove_card(_card);
                 self.discard.push(_card);
 
                 self.history.push(HistoryEntry {
@@ -139,7 +139,7 @@ impl DogGame for Game {
                     switched_piece_color: None,
                 });
 
-                self.player_mut_by_color(color).pieces_to_place -= 1;
+                self.player_mut_by_color(current_player_color).pieces_to_place -= 1;
                 self.current_player_color = self.current_player_color.next();
 
                 Ok(())
@@ -186,10 +186,97 @@ impl DogGame for Game {
     }
 }
 
-// Game Logik: 
-// 4 Spieler je 5-2 Karten
-// Tauschen 1 Karte 
-// Spielt Karten aus
-// Musst alle Karten ausspielen
-// Wenn Legen nicht möglich, alle Karten ablegen
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_place_on_empty_start() {
+        let mut game = Game::new();
+
+        game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
+
+        let start = Board::start_field(Color::Red) as usize;
+        let card = Card::Ace;
+        let action = Action {
+            player: Color::Red,
+            action: ActionKind::Place,
+            card: Card::Ace,
+        };
+
+        assert!(game.action(Card::Ace, action).is_ok());
+        assert!(game.board.tiles[start].is_some());
+        assert_eq!(game.player_mut_by_color(Color::Red).pieces_to_place, 3);
+        assert!(!game.player_mut_by_color(Color::Red).cards.contains(&card));
+        assert!(game.discard.contains(&card));
+        assert_eq!(game.current_player_color, Color::Green);
+    }
+
+    #[test]
+    fn test_invalid_card_cannot_place() {
+        let mut game = Game::new();
+
+        game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
+
+        let invalid_card = Card::Two;
+        let action = Action {
+            player: Color::Red,
+            action: ActionKind::Place,
+            card: invalid_card
+        };
+
+        assert!(game.action(Card::Two, action).is_err());
+    }
+
+    #[test]
+    fn test_cannot_place_on_own_protected_piece() {
+        let mut game = Game::new();
+
+        game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
+
+        let start = Board::start_field(Color::Red) as usize;
+        let card = Card::Ace;
+        let action = Action {
+            player: Color::Red,
+            action: ActionKind::Place,
+            card: Card::Ace,
+        };
+
+        game.board.tiles[start] = Some(Piece {
+            color: Color::Red,
+            left_start: false
+        });
+
+        assert!(game.action(card, action).is_err());
+        assert_eq!(game.board.tiles[start].as_ref().unwrap().color, Color::Red);
+    }
+
+    #[test]
+    fn test_place_and_beat_opponent() {
+        let mut game = Game::new();
+
+        game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
+
+        let start = Board::start_field(Color::Red) as usize;
+        let card = Card::Ace;
+        let action = Action {
+            player: Color::Red,
+            action: ActionKind::Place,
+            card: Card::Ace,
+        };
+
+        game.board.tiles[start] = Some(Piece {
+            color: Color::Green,
+            left_start: true
+        });
+
+        assert!(game.action(card, action).is_ok());
+        assert_eq!(game.board.tiles[start].as_ref().unwrap().color, Color::Red);
+    }
+
+
+
+    
+}
+
 
