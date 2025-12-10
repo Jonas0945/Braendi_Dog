@@ -19,7 +19,7 @@ impl Player {
         }
     }
     
-    pub fn next_color(&self) -> Color {
+    pub fn next(&self) -> Color {
         match self.color {
             Color::Red => Color::Green,
             Color::Green => Color::Blue,

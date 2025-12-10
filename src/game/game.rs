@@ -25,6 +25,17 @@ pub struct Game {
     current_player_color: Color,
 }
 
+impl Game {
+    pub fn player_mut_by_color(&mut self, color: Color) -> &mut Player {
+        match color {
+            Color::Red => &mut self.red,
+            Color::Green => &mut self.green,
+            Color::Blue => &mut self.blue,
+            Color::Yellow => &mut self.yellow,
+        }
+    }
+}
+
 
 pub trait DogGame {
     // Creates new instance with an empty board and initialized deck and players
@@ -95,40 +106,31 @@ impl DogGame for Game {
                     Card::Ace | Card::King | Card::Joker => {}
                     _ => return Err("Cannot place piece with this card."),
                 }
-
+                
                 let color = self.current_player_color;
                 let start = Board::start_field(color) as usize;
 
-                let mut beaten_piece_color: Option<Color> = None;
+                if self.player_mut_by_color(color).pieces_to_place == 0 {
+                    return Err("Cannot place piece: no pieces left to place.");
+                }
+
+                let mut beaten_piece_color = None;
 
                 if let Some(piece) = self.board.tiles[start].take() {
                     if piece.color == color && !piece.left_start {
                         self.board.tiles[start] = Some(piece);
-                        return Err("Cannot place piece: your protected piece is blocking.");
-                    } else {
-                        beaten_piece_color = Some(piece.color);
-                        match piece.color {
-                            Color::Red => self.red.pieces_to_place += 1,
-                            Color::Green => self.green.pieces_to_place += 1,
-                            Color::Blue => self.blue.pieces_to_place += 1,
-                            Color::Yellow => self.yellow.pieces_to_place += 1,
-                        }
+                        return Err("Cannot place piece: your protected piece is blocking.")
                     }
+                    beaten_piece_color = Some(piece.color);
+                }
+
+                if let Some(beaten_color) = beaten_piece_color {
+                    self.player_mut_by_color(beaten_color).pieces_to_place += 1;
                 }
 
                 self.board.tiles[start] = Some (Piece::new(color));
 
-                 let player_cards = match color {
-                    Color::Red => &mut self.red.cards,
-                    Color::Green => &mut self.green.cards,
-                    Color::Blue => &mut self.blue.cards,
-                    Color::Yellow => &mut self.yellow.cards,
-                };
-
-                if let Some(index) = player_cards.iter().position(|&c| c == _card) {
-                    player_cards.remove(index);
-                }
-
+                self.player_mut_by_color(color).remove_card(_card);
                 self.discard.push(_card);
 
                 self.history.push(HistoryEntry {
@@ -136,6 +138,9 @@ impl DogGame for Game {
                     beaten_piece_color,
                     switched_piece_color: None,
                 });
+
+                self.player_mut_by_color(color).pieces_to_place -= 1;
+                self.current_player_color = self.current_player_color.next();
 
                 Ok(())
             }
