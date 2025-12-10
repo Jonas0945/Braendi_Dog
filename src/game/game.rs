@@ -4,12 +4,14 @@ use super::color::*;
 use super::deck::*;
 use super::card::*;
 use super::player::*;
+use super::board::*;
+use super::history::*;
 
 const CARDS_PER_ROUND: [u8;4] = [5,4,3,2];
 
 pub struct Game {
-    board: [Option<Piece>; 80],
-    history: Vec<Action>,
+    board: Board,
+    history: Vec<HistoryEntry>,
     round: u8,
 
     deck: Deck,
@@ -21,6 +23,17 @@ pub struct Game {
     yellow: Player,
 
     current_player_color: Color,
+}
+
+impl Game {
+    pub fn player_mut_by_color(&mut self, color: Color) -> &mut Player {
+        match color {
+            Color::Red => &mut self.red,
+            Color::Green => &mut self.green,
+            Color::Blue => &mut self.blue,
+            Color::Yellow => &mut self.yellow,
+        }
+    }
 }
 
 
@@ -35,7 +48,7 @@ pub trait DogGame {
     fn current_player(&self) -> &Player;
 
     // Matches and applies the action of playing the given card for the current player
-    fn action(&mut self, card: Card) -> Result<(), &'static str>;
+    fn action(&mut self, card: Card, action: Action) -> Result<(), &'static str>;
 
     // Undoes the last action
     fn undo(&mut self) -> Result<(), &'static str>;
@@ -56,7 +69,7 @@ pub trait DogGame {
 impl DogGame for Game {
     fn new() -> Self {
         Self {
-            board: [None; 80],
+            board: Board::new(),
             history: Vec::new(),
             round: 0,
 
@@ -82,11 +95,56 @@ impl DogGame for Game {
     }
     
     fn board_state(&self) -> &[Option<Piece>; 80] {
-        &self.board
+        &self.board.tiles
     }
 
-    fn action(&mut self, _card: Card) -> Result<(), &'static str> {
-        todo!()
+    fn action(&mut self, _card: Card, _action: Action) -> Result<(), &'static str> {
+        match _action.action {
+            ActionKind::Place => {
+
+                match _card {
+                    Card::Ace | Card::King | Card::Joker => {}
+                    _ => return Err("Cannot place piece with this card."),
+                }
+                
+                let current_player_color = self.current_player_color;
+                let start = Board::start_field(current_player_color) as usize;
+
+                if self.current_player().pieces_to_place == 0 {
+                    return Err("Cannot place piece: no pieces left to place.");
+                }
+
+                let mut beaten_piece_color = None;
+
+                if let Some(piece) = self.board.tiles[start].take() {
+                    if piece.color == current_player_color && !piece.left_start {
+                        self.board.tiles[start] = Some(piece);
+                        return Err("Cannot place piece: your protected piece is blocking.")
+                    }
+                    beaten_piece_color = Some(piece.color);
+                    self.player_mut_by_color(piece.color).pieces_to_place += 1;
+                }
+
+                self.board.tiles[start] = Some (Piece::new(current_player_color));
+
+                self.player_mut_by_color(current_player_color).remove_card(_card);
+                self.discard.push(_card);
+
+                self.history.push(HistoryEntry {
+                    action: _action,
+                    beaten_piece_color,
+                    switched_piece_color: None,
+                });
+
+                self.player_mut_by_color(current_player_color).pieces_to_place -= 1;
+                self.current_player_color = self.current_player_color.next();
+
+                Ok(())
+            }
+
+            ActionKind::Move(_, _) => todo!(),
+            ActionKind::Switch(_, _) => todo!(),
+        }
     }
     
     fn undo(&mut self) -> Result<(), &'static str> {
@@ -125,10 +183,97 @@ impl DogGame for Game {
     }
 }
 
-// Game Logik: 
-// 4 Spieler je 5-2 Karten
-// Tauschen 1 Karte 
-// Spielt Karten aus
-// Musst alle Karten ausspielen
-// Wenn Legen nicht möglich, alle Karten ablegen
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_place_on_empty_start() {
+        let mut game = Game::new();
+
+        game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
+
+        let start = Board::start_field(Color::Red) as usize;
+        let card = Card::Ace;
+        let action = Action {
+            player: Color::Red,
+            action: ActionKind::Place,
+            card: Card::Ace,
+        };
+
+        assert!(game.action(Card::Ace, action).is_ok());
+        assert!(game.board.tiles[start].is_some());
+        assert_eq!(game.player_mut_by_color(Color::Red).pieces_to_place, 3);
+        assert!(!game.player_mut_by_color(Color::Red).cards.contains(&card));
+        assert!(game.discard.contains(&card));
+        assert_eq!(game.current_player_color, Color::Green);
+    }
+
+    #[test]
+    fn test_invalid_card_cannot_place() {
+        let mut game = Game::new();
+
+        game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
+
+        let invalid_card = Card::Two;
+        let action = Action {
+            player: Color::Red,
+            action: ActionKind::Place,
+            card: invalid_card
+        };
+
+        assert!(game.action(Card::Two, action).is_err());
+    }
+
+    #[test]
+    fn test_cannot_place_on_own_protected_piece() {
+        let mut game = Game::new();
+
+        game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
+
+        let start = Board::start_field(Color::Red) as usize;
+        let card = Card::Ace;
+        let action = Action {
+            player: Color::Red,
+            action: ActionKind::Place,
+            card: Card::Ace,
+        };
+
+        game.board.tiles[start] = Some(Piece {
+            color: Color::Red,
+            left_start: false
+        });
+
+        assert!(game.action(card, action).is_err());
+        assert_eq!(game.board.tiles[start].as_ref().unwrap().color, Color::Red);
+    }
+
+    #[test]
+    fn test_place_and_beat_opponent() {
+        let mut game = Game::new();
+
+        game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
+
+        let start = Board::start_field(Color::Red) as usize;
+        let card = Card::Ace;
+        let action = Action {
+            player: Color::Red,
+            action: ActionKind::Place,
+            card: Card::Ace,
+        };
+
+        game.board.tiles[start] = Some(Piece {
+            color: Color::Green,
+            left_start: true
+        });
+
+        assert!(game.action(card, action).is_ok());
+        assert_eq!(game.board.tiles[start].as_ref().unwrap().color, Color::Red);
+    }
+
+
+
+    
+}
+
 

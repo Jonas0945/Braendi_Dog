@@ -44,19 +44,10 @@ pub const PLAYER_HOUSE: [(Color, [Point; 4]); 4] = [
     (Color::Green,  [68, 69, 70, 71]),
     (Color::Blue,   [72, 73, 74, 75]),
     (Color::Yellow, [76, 77, 78, 79]),
-];
-
-pub fn house_entry_for(color: Color) -> Point {
-    match color {
-        Color::Red => 56,
-        Color::Green => 68,
-        Color::Blue => 72,
-        Color::Yellow => 76,
-    }
-}
+]; 
 
 pub struct Board {
-    tiles: [Option<Piece>; 80],
+    pub tiles: [Option<Piece>; 80],
 }
 
 impl Board {
@@ -73,21 +64,28 @@ impl Board {
         self.tiles[p as usize]
     }
 
-    pub fn check_piece(&self, piece: Piece) -> Option<Point> {
-        for (i, tile) in self.tiles.iter().enumerate() {
-            if let Some(p) = tile {
-                if p.color() == piece.color() && p.id() == piece.id() {
-                    return Some(i as Point);
-                }
-            }
-        }
-        None
-    }
-
-    pub fn start(&mut self, piece: Piece) -> Option<Piece> {
+   /*pub fn start(&mut self, piece: Piece) -> Option<Piece> {
         let entry = house_entry_for(piece.color()); 
         let old = self.tiles[entry as usize];
         self.tiles[entry as usize] = Some(piece);
         old
+    }*/
+
+    pub fn start_field(color: Color) -> Point {
+        match color {
+            Color::Red => 0,
+            Color::Green => 15,
+            Color::Blue => 31, 
+            Color::Yellow => 47,
+        }
     }
+
+    pub fn house_entry_for(color: Color) -> Point {
+        match color {
+            Color::Red => 56,
+            Color::Green => 68,
+            Color::Blue => 72,
+            Color::Yellow => 76,
+        }
+    }   
 }

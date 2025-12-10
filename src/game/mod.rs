@@ -6,3 +6,4 @@ pub mod action;
 pub mod color;
 pub mod piece;
 pub mod player;
+pub mod history;
