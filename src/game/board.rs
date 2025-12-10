@@ -64,7 +64,7 @@ impl Board {
         self.tiles[p as usize]
     }
 
-   /*ub fn start(&mut self, piece: Piece) -> Option<Piece> {
+   /*pub fn start(&mut self, piece: Piece) -> Option<Piece> {
         let entry = house_entry_for(piece.color()); 
         let old = self.tiles[entry as usize];
         self.tiles[entry as usize] = Some(piece);
