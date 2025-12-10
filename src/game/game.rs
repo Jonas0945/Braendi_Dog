@@ -190,6 +190,7 @@ impl DogGame for Game {
                     beaten_piece_color: None,
                     switched_piece_color: Some(switched_color),
                 });
+                self.current_player_color = self.current_player_color.next();
 
                 Ok(())
             },
