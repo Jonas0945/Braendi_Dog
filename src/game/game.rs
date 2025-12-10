@@ -122,10 +122,7 @@ impl DogGame for Game {
                         return Err("Cannot place piece: your protected piece is blocking.")
                     }
                     beaten_piece_color = Some(piece.color);
-                }
-
-                if let Some(beaten_color) = beaten_piece_color {
-                    self.player_mut_by_color(beaten_color).pieces_to_place += 1;
+                    self.player_mut_by_color(piece.color).pieces_to_place += 1;
                 }
 
                 self.board.tiles[start] = Some (Piece::new(current_player_color));
