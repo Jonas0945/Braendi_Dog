@@ -38,6 +38,10 @@ use super::piece::Piece;
 
 pub type Point = u8; // 0–79
 
+pub const HOUSE_TILES: [Point; 16] = [
+    64, 65, 66, 67, 68, 69, 70, 71,
+    72, 73, 74, 75, 76, 77, 78, 79
+];
 
 pub const PLAYER_HOUSE: [(Color, [Point; 4]); 4] = [
     (Color::Red,    [64, 65, 66, 67]),
