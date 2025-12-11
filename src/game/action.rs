@@ -1,6 +1,4 @@
-use std::str::FromStr;
-
-use crate::game::action;
+use std::{fmt::{Display, Pointer}, str::FromStr, vec};
 
 use super::card::Card;
 use super::board::Point;
@@ -24,7 +22,7 @@ impl FromStr for Action {
     type Err = &'static str;
 
     /// Example inputs:
-    /// "G 0 P" - Green place piece with Joker (= 0)
+    /// "G 0 P" - Green places piece with Joker (= 0)
     /// "Y 4 M 16 20" - Yellow moves from 16 to 20 with 4
     /// "B 11 S 40 45" - Blue switches between 40 and 45 with Jack (= 11)
     
@@ -92,5 +90,41 @@ impl FromStr for Action {
         };
 
         Ok(Action { player, card, action })
+    }
+}
+
+impl Display for Action {
+    fn fmt (&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let player_str = match self.player {
+            Color::Red => "R",
+            Color::Green => "G",
+            Color::Blue => "B",
+            Color::Yellow => "Y",
+        };
+
+        let card_str = match self.card {
+            Card::King => "King",
+            Card::Queen => "Queen",
+            Card::Jack => "Jack",
+            Card::Ten => "10",
+            Card::Nine => "9",
+            Card::Eight => "8",
+            Card::Seven => "7",
+            Card::Six => "6",
+            Card::Five => "5",
+            Card::Four => "4",
+            Card::Three => "3",
+            Card::Two => "2",
+            Card::Ace => "Ace",
+            Card::Joker => "Joker",
+        };
+
+        let action_str = match self.action {
+            ActionKind::Place => format!("P"),
+            ActionKind::Move(from, to) => format!("M {from} {to}"),
+            ActionKind::Switch(from, to) => format!("S {from} {to}"),
+        };
+
+        write!(f, "{player_str} {card_str} {action_str}")
     }
 }
