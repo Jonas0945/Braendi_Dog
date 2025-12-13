@@ -4,18 +4,20 @@ use super::card::Card;
 use super::board::Point;
 use super::color::Color;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone,  PartialEq, Eq, Debug)]
 pub struct Action {
     pub player: Color,
     pub card: Card,
     pub action: ActionKind,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ActionKind {
     Place,
     Move(Point, Point),
     Switch(Point, Point),
+    Split(Vec<(Point, u8)>), 
+
 }
 
 impl FromStr for Action {
@@ -119,10 +121,16 @@ impl Display for Action {
             Card::Joker => "Joker",
         };
 
-        let action_str = match self.action {
+        let action_str = match &self.action {
             ActionKind::Place => format!("P"),
             ActionKind::Move(from, to) => format!("M {from} {to}"),
             ActionKind::Switch(from, to) => format!("S {from} {to}"),
+            ActionKind::Split(moves) => {
+                let details: Vec<String> = moves.iter()
+                    .map(|(f,s)|format!("{}:{}", f, s))
+                    .collect();
+                format!("SPLIT {}", details.join(""))
+            }
         };
 
         write!(f, "{player_str} {card_str} {action_str}")
