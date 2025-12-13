@@ -23,6 +23,7 @@ pub struct Game {
     yellow: Player,
 
     current_player_color: Color,
+    game_seven_rest: u8,
 }
 
 impl Game {
@@ -82,6 +83,7 @@ impl DogGame for Game {
             yellow: Player::new(Color::Yellow),
 
             current_player_color: Color::Red,
+            game_seven_rest: 0,
         }
     }
 
@@ -142,7 +144,191 @@ impl DogGame for Game {
                 Ok(())
             }
 
-            ActionKind::Move(_, _) => todo!(),
+            ActionKind::Move(from, to) => {
+                match _card {
+                    Card::Jack => {},
+                    _ => return Err("Cannot move piece with this card."),
+                }
+
+                let current_player_color = self.current_player_color;
+
+                let from_piece = match self.board.check_tile(from) {
+                    Some(p) => p,
+                    None => return Err("No piece on the from tile."),
+                };
+
+                if from_piece.color != current_player_color {
+                    return Err("You can only move your own pieces.");
+                }
+
+                if from > 63 && to < from {
+                    return Err("Cannot go backwards in the house.");
+                }
+                if from > 63 && to <= 63 {
+                    return Err("Cannot leave the house once entered.");
+                }
+
+                let mut into_house = false;
+                if to > 63 {
+                    let house = PLAYER_HOUSE
+                        .iter()
+                        .find(|(c, _)| *c == current_player_color)
+                        .unwrap()
+                        .1;
+
+                    if !house.contains(&to) {
+                        return Err("Cannot move into another player's house.");
+                    }
+                    into_house = true;
+                }
+
+                // simulate backwards if card is Four
+                let mut allow_backwards = false;
+                if let Card::Four = _card {
+                    if !into_house {
+                        let mut nfrom = from;
+                        allow_backwards = true;
+
+                        for _ in 0..4 { 
+                            if nfrom == 0 {
+                                nfrom = 63;
+                            } else {
+                                nfrom -= 1;
+                            }
+
+                            if let Some(p) = self.board.check_tile(nfrom) {
+                                if !p.left_start {
+                                    allow_backwards = false;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if allow_backwards && nfrom == to {
+                            let moving_piece = self.board.tiles[from as usize].take().unwrap();
+                            let beaten_piece_color = if let Some(beaten) = self.board.tiles[to as usize].take() {
+                                self.player_mut_by_color(beaten.color).pieces_to_place += 1;
+                                Some(beaten.color)
+                            } else {
+                                None
+                            };
+
+                            self.board.tiles[to as usize] = Some(moving_piece);
+                            self.player_mut_by_color(current_player_color).remove_card(_card);
+                            self.discard.push(_card);
+
+                            self.history.push(HistoryEntry {
+                                action: _action,
+                                beaten_piece_color,
+                                switched_piece_color: None,
+                            });
+
+                            self.current_player_color = self.current_player_color.next();
+                            return Ok(());
+                        }
+                    }
+                }
+
+                // simulate forward move
+                let mut nfrom = from;
+                let mut in_house = into_house;
+                let mut actual_steps = 0;
+                let max_steps = 13;
+                let mut passed: Vec<Point> = Vec::new();
+
+                for _ in 0..max_steps {
+                    if nfrom == to {
+                        break;
+                    }
+
+                    actual_steps += 1;
+
+                    if !in_house && nfrom == Board::house_entry_for(current_player_color) && into_house {
+                        nfrom = PLAYER_HOUSE
+                            .iter()
+                            .find(|(c, _)| *c == current_player_color)
+                            .unwrap()
+                            .1[0]; //
+                        in_house = true;
+                    } else if in_house {
+                        nfrom += 1;
+                    } else {
+                        nfrom = (nfrom + 1) % 64;
+                    }
+
+                    if let Some(p) = self.board.check_tile(nfrom) {
+                        if in_house {
+                            return Err("Cannot pass pieces in the house.");
+                        } else {
+                            passed.push(nfrom);
+                        }
+                    }
+                }
+
+                if nfrom != to {
+                    return Err("Move not reachable.");
+                }
+                match _card {
+                    Card::Ace => {
+                        if actual_steps != 1 && actual_steps != 11 {
+                            return Err("Ace can only be used as 1 or 11 steps.")
+                        }
+
+                    }
+
+                    Card::Seven => {
+                        if actual_steps > 7 {
+                            return Err("More than 7 steps used for 7.");
+                        }
+                        if self.game_seven_rest==0{
+                           self.game_seven_rest = 7 - actual_steps;
+                        }
+                        else {
+                            if actual_steps>self.game_seven_rest{
+                                return Err("Seven split in more than 7 moves.")
+                            }
+                            self.game_seven_rest=self.game_seven_rest-actual_steps;
+                        }
+                        // Beat all pieces along the passed tiles
+                        for &tile in &passed {
+                            if let Some(p) = self.board.tiles[tile as usize].take() {
+                                self.player_mut_by_color(p.color).pieces_to_place += 1;
+                            }
+                        }
+
+                    }
+
+
+                    _ => {
+                        if _card.value() != actual_steps{
+                            return Err("Value of card is not the same as steps.")
+                        }
+                    }
+                }
+                
+                let moving_piece = self.board.tiles[from as usize].take().unwrap();
+                let beaten_piece_color = if let Some(beaten) = self.board.tiles[to as usize].take() {
+                    self.player_mut_by_color(beaten.color).pieces_to_place += 1;
+                    Some(beaten.color)
+                } else {
+                    None
+                };
+
+                self.board.tiles[to as usize] = Some(moving_piece);
+                if self.game_seven_rest==0{
+                self.player_mut_by_color(current_player_color).remove_card(_card);
+                self.discard.push(_card);
+                self.current_player_color = self.current_player_color.next();
+                } 
+                self.history.push(HistoryEntry {
+                    action: _action,
+                    beaten_piece_color,
+                    switched_piece_color: None,
+                });
+
+
+                Ok(())
+            },
             ActionKind::Switch(from, to) => {
 
                 match _card {
