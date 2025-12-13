@@ -106,7 +106,6 @@ impl DogGame for Game {
     fn action(&mut self, _card: Card, _action: Action) -> Result<(), &'static str> {
         match _action.action {
             ActionKind::Place => {
-
                 match _card {
                     Card::Ace | Card::King | Card::Joker => {},
                     _ => return Err("Cannot place piece with this card."),
@@ -115,22 +114,34 @@ impl DogGame for Game {
                 let current_player_color = self.current_player_color;
                 let start = Board::start_field(current_player_color) as usize;
 
-                if self.current_player().pieces_to_place == 0 {
+                // 1. Check: Haben wir überhaupt noch IDs im Haus?
+                if self.current_player().pieces_to_place() == 0 {
                     return Err("Cannot place piece: no pieces left to place.");
                 }
 
                 let mut beaten_piece_color = None;
 
+                // 2. Check: Was liegt auf dem Startfeld?
                 if let Some(piece) = self.board.tiles[start].take() {
                     if piece.color == current_player_color && !piece.left_start {
+                        // Eigene geschützte Figur blockiert -> Fehler, Figur zurücklegen
                         self.board.tiles[start] = Some(piece);
                         return Err("Cannot place piece: your protected piece is blocking.")
                     }
+                    // Fremde Figur oder eigene ungeschützte -> Schlagen!
                     beaten_piece_color = Some(piece.color);
-                    self.player_mut_by_color(piece.color).pieces_to_place += 1;
+                    
+                    // WICHTIG: ID an den Besitzer zurückgeben!
+                    self.player_mut_by_color(piece.color).return_piece_id(piece.id);
                 }
 
-                self.board.tiles[start] = Some(Piece::new(current_player_color, 0));
+                // 3. Neue Figur erstellen: Wir holen uns eine echte ID vom Spieler!
+                let new_id = self.player_mut_by_color(current_player_color)
+                                 .take_next_piece_id()
+                                 .expect("Should work because check #1 passed");
+
+                self.board.tiles[start] = Some(Piece::new(current_player_color, new_id));
+
                 self.player_mut_by_color(current_player_color).remove_card(_card);
                 self.discard.push(_card);
 
@@ -140,9 +151,7 @@ impl DogGame for Game {
                     switched_piece_color: None,
                 });
 
-                self.player_mut_by_color(current_player_color).pieces_to_place -= 1;
                 self.current_player_color = self.current_player_color.next();
-
                 Ok(())
             }
 
@@ -158,9 +167,10 @@ impl DogGame for Game {
                 if total_steps != 7 {
                     return Err("Total steps for split must be exactly 7.");
                 }
+
                 let current_player_color = self.current_player_color;
                 let mut temp_board = self.board.clone();
-                let mut beaten_piece_color = None;
+                let mut beaten_pieces: Vec<(Color, u8)> = Vec::new();
                 for (from, steps) in sub_moves.iter().copied() {
                     let piece = match temp_board.check_tile(from) {
                         Some(p) => p,
@@ -182,15 +192,20 @@ impl DogGame for Game {
                     let moving_piece = temp_board.tiles[from as usize].take().unwrap();
 
                     if let Some(beaten) = temp_board.tiles[target as usize].replace(moving_piece){
-                        beaten_piece_color = Some(beaten.color);
+                    beaten_pieces.push((beaten.color, beaten.id))                   
                     }
                     
                 }
 
                     self.board = temp_board;
+                    for (color, id) in &beaten_pieces {
+                        self.player_mut_by_color(*color).return_piece_id(*id);
+                    }
                     self.player_mut_by_color(current_player_color).remove_card(_card);
                     self.discard.push(_card);
-                    self.history.push(HistoryEntry { action: _action, beaten_piece_color, switched_piece_color: None, });
+                    let last_beaten_color = beaten_pieces.last().map(|(c, _)| *c);
+                    self.history.push(HistoryEntry { action: _action, beaten_piece_color: last_beaten_color, switched_piece_color: None, });
+
                     self.current_player_color = self.current_player_color.next();
                     Ok(())
             },
@@ -305,7 +320,7 @@ mod tests {
 
         assert!(game.action(Card::Ace, action).is_ok());
         assert!(game.board.tiles[start].is_some());
-        assert_eq!(game.player_mut_by_color(Color::Red).pieces_to_place, 3);
+        assert_eq!(game.player_mut_by_color(Color::Red).pieces_to_place(), 3);
         assert!(!game.player_mut_by_color(Color::Red).cards.contains(&card));
         assert!(game.discard.contains(&card));
         assert_eq!(game.current_player_color, Color::Green);
