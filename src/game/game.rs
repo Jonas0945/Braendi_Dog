@@ -94,20 +94,37 @@ impl DogGame for Game {
         &self.board
     }
 
-    fn action(&mut self, mut action: Action) -> Result<(), &'static str> {
+    fn action(&mut self,  action: Action) -> Result<(), &'static str> {
         match action.action{
             ActionKind::Place => todo!(),
             ActionKind::Move(_, _) => todo!(),
             ActionKind::Switch(_, _) => todo!(),
             ActionKind::Swap(card_index) => {
-                if action.player.swapped_cards_count == self.round{
+                let playercolor = action.player.color;
+                let swapping_player;
+                match playercolor {
+                    Color::Red => swapping_player = &self.red   ,
+                    Color::Green => swapping_player = &self.green,
+                    Color::Blue => swapping_player = &self.blue,
+                    Color::Yellow => swapping_player = &self.yellow,
+                }
+                if swapping_player.swapped_cards_count == self.round{
                     if self.swapping_phase{
-                        if self.swap_buffer.iter().any(|(p, _)| *p == action.player){
+                        if self.swap_buffer.iter().any(|(p, _)| p == swapping_player){
                             return Err("Es darf pro Spieler nur eine Karte getauscht werden")
                         }
+                        if card_index >= swapping_player.cards.len() {
+                            return Err("Ungültiger Kartenindex für den Tausch")
+                        }
+
+                        self.swap_buffer.push((swapping_player.clone(), swapping_player.cards.get(card_index).unwrap().clone()));
                         
-                        self.swap_buffer.push((action.player, *action.player.cards.get(card_index).expect("Spieler hat weniger Karten als die angegeben anzahl")));
-                        action.player.cards.remove(card_index);
+                        match playercolor {
+                            Color::Red => {self.red.cards.remove(card_index); self.red.swapped_cards_count +=1;},
+                            Color::Green => {self.green.cards.remove(card_index); self.green.swapped_cards_count +=1;},
+                            Color::Blue => {self.blue.cards.remove(card_index); self.blue.swapped_cards_count +=1;},
+                            Color::Yellow => {self.yellow.cards.remove(card_index); self.yellow.swapped_cards_count +=1;},
+}
                         if self.swap_buffer.len()==4 {
                                 for (p, c) in self.swap_buffer.drain(..){
                                     match p.teammate() {
@@ -118,6 +135,7 @@ impl DogGame for Game {
                                     }
                                 }  
                             self.swapping_phase = false;
+                            
                             return Ok(())
                         }
                     }else {
