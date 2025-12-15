@@ -157,74 +157,54 @@ impl DogGame for Game {
 
             ActionKind::Move(_, _) => todo!(),
 
-            ActionKind::Split(ref sub_moves) => {
-    match _card {
-        Card::Seven | Card::Joker => {
-        }
-        _ => return Err("Split is only allowed with 7 or Joker."),
+            ActionKind::Split(moves) => {
+    if !matches!(_card, Card::Seven | Card::Joker) {
+        return Err("Split needs 7 or Joker");
     }
 
-    let total_steps: u8 = sub_moves
-        .iter()
-        .map(|(_, steps)| steps)
-        .sum();
-
-    if total_steps != 7 {
-        return Err("Total steps for split must be exactly 7.");
+    if moves.iter().map(|(_, s)| s).sum::<u8>() != 7 {
+        return Err("Split sum != 7");
     }
 
-    let active_color = self.current_player_color;
+    let me = self.current_player_color;
+    let mut sandbox = self.board.clone();
+    let mut kills = Vec::with_capacity(moves.len());
 
-    let mut tmp_board = self.board.clone();
+    for (pos, steps) in moves {
+        let p = sandbox.tiles[*pos as usize]
+            .take()
+            .ok_or("Source tile empty")?;
 
-    let mut beaten: Vec<(Color, u8)> = Vec::new();
-
-    for (from, steps) in sub_moves.iter().copied() {
-        let piece = match tmp_board.check_tile(from) {
-            Some(p) => p,
-            None => return Err("Cannot move from empty tile in split."),
-        };
-
-        if piece.color != active_color {
-            return Err("Can only move own pieces.");
+        if p.color != me {
+            return Err("Not my piece");
         }
 
-        let target = match tmp_board.calculate_target(from, steps as i8, active_color) {
-            Some(t) => t,
-            None => return Err("Move invalid: Target out of bounds."),
-        };
+        let target = sandbox.calculate_target(*pos, *steps as i8, me)
+            .ok_or("Target oob")?;
 
-        if let Some(other) = tmp_board.check_tile(target) {
-            if other.color == active_color {
-                return Err("Cannot land on own piece.");
+        if let Some(occ) = &sandbox.tiles[target as usize] {
+            if occ.color == me {
+                return Err("Self block");
             }
         }
 
-        let moving_piece = tmp_board.tiles[from as usize]
-            .take()
-            .expect("Checked tile above, should exist here");
-
-    
-        if let Some(hit_piece) = tmp_board.tiles[target as usize].replace(moving_piece) {
-            beaten.push((hit_piece.color, hit_piece.id));
+        if let Some(victim) = sandbox.tiles[target as usize].replace(p) {
+            kills.push((victim.color, victim.id));
         }
-
     }
 
-    self.board = tmp_board;
+    self.board = sandbox;
 
-    for (color, id) in &beaten {
-        self.player_mut_by_color(*color).return_piece_id(*id);
+    for (c, id) in &kills {
+        self.player_mut_by_color(*c).return_piece_id(*id);
     }
 
-    self.player_mut_by_color(active_color).remove_card(_card);
+    self.player_mut_by_color(me).remove_card(_card);
     self.discard.push(_card);
-
-    let last_beaten_color = beaten.last().map(|(c, _)| *c);
 
     self.history.push(HistoryEntry {
         action: _action,
-        beaten_piece_color: last_beaten_color,
+        beaten_piece_color: kills.last().map(|(c, _)| *c),
         switched_piece_color: None,
     });
 
@@ -232,8 +212,6 @@ impl DogGame for Game {
 
     Ok(())
 },
-
-
             ActionKind::Switch(from, to) => {
 
                 match _card {
@@ -320,9 +298,53 @@ impl DogGame for Game {
         todo!()
     }
     
-    fn is_winner(&self) -> bool {
-        todo!()
-    }
+fn is_winner(&self) -> bool {
+
+//hilfsfunktion um zu gucken ob der Spieler alle Pieces in seinem Haus hat 
+
+        let player_finished = |color: Color| -> bool {
+
+            let house_indices = match color {
+
+                Color::Red    => [64, 65, 66, 67],
+
+                Color::Green  => [68, 69, 70, 71],
+
+                Color::Blue   => [72, 73, 74, 75],
+
+                Color::Yellow => [76, 77, 78, 79],
+
+            };
+
+
+
+            // Prüfen Sind ALLE diese Felder mit einer Figur der RICHTIGEN Farbe belegt?
+
+            house_indices.iter().all(|&idx| {
+
+                self.board.tiles[idx].is_some_and(|p| p.color == color)
+
+            })
+
+        };
+
+
+
+        // Ein Team gewinnt, wenn BEIDE Partner fertig sind.
+
+        // Team 1: Rot & Blau
+
+        // Team 2: Grün & Gelb
+
+        let team_rb_wins = player_finished(Color::Red) && player_finished(Color::Blue);
+
+        let team_gy_wins = player_finished(Color::Green) && player_finished(Color::Yellow);
+
+
+
+        team_rb_wins || team_gy_wins
+
+}
 }
 
 #[cfg(test)]
