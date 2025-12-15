@@ -20,15 +20,6 @@ impl Player {
             swapped_cards_count: 0,
         }
     }
-    
-    pub fn next_color(&self) -> Color {
-        match self.color {
-            Color::Red => Color::Green,
-            Color::Green => Color::Blue,
-            Color::Blue => Color::Yellow,
-            Color::Yellow => Color::Red,
-        }
-    }
 
     pub fn teammate(&self) -> Color {
         match self.color {
@@ -36,6 +27,12 @@ impl Player {
             Color::Blue => Color::Red,
             Color::Green => Color::Yellow,
             Color::Yellow => Color::Green
+        }
+    }
+
+    pub fn remove_card(&mut self, card: Card) {
+        if let Some(i) = self.cards.iter().position(|&c| c == card) {
+            self.cards.remove(i);
         }
     }
 
