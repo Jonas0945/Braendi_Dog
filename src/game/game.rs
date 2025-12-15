@@ -1,5 +1,6 @@
 use core::error;
 
+use crate::game::action;
 use crate::game::card;
 use crate::game::player;
 
@@ -168,7 +169,6 @@ impl DogGame for Game {
             self.yellow.cards.push(self.deck.draw().unwrap());
         }
 
-        self.swap_cards();
         
         self.round += 1;
     }
@@ -189,3 +189,79 @@ impl DogGame for Game {
 // Musst alle Karten ausspielen
 // Wenn Legen nicht möglich, alle Karten ablegen
 
+
+   /* let mut game =Game::new();
+    game.new_round();s
+    let a1=Action{player: game.red.clone(),card:Card::Ace, action: ActionKind::Swap(0)};
+    game.red.cards.push(Card::Ace);
+    game.action(a1);
+    game.swap_buffer.push((game.blue.clone(),Card::Five));
+        game.swap_buffer.push((game.yellow.clone(),Card::Joker));
+
+            game.swap_buffer.push((game.green.clone(), Card::Four));
+
+    assert!(game.blue.cards[0]==Card::Ace);*/
+  #[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_swap_successful() {
+        let mut game = Game::new();
+        
+        // new_round() aufrufen, um Karten zu verteilen (5 pro Spieler in Runde 0)
+        game.new_round();
+        
+        // Round zurücksetzen, damit Swapping in "Runde 0" funktioniert (swapped_cards_count == 0 == round)
+        game.round = 0;
+        
+        // Stelle sicher, dass Swapping-Phase aktiv ist (sollte von new() kommen)
+        assert!(game.swapping_phase);
+        
+        // Swap für roten Spieler (verwende die erste Karte aus der Hand)
+        let red_card = game.red.cards[0].clone();  // Echte Karte aus der Hand
+        let a1 = Action {
+            player: game.red.clone(),
+            card: red_card,  // Verwende die echte Karte
+            action: ActionKind::Swap(0),
+        };
+        game.action(a1).unwrap();
+        
+        // Swap für grünen Spieler
+        let green_card = game.green.cards[0].clone();
+        let a2 = Action {
+            player: game.green.clone(),
+            card: green_card,
+            action: ActionKind::Swap(0),
+        };
+        game.action(a2).unwrap();
+        
+        // Swap für blauen Spieler
+        let blue_card = game.blue.cards[0].clone();
+        let a3 = Action {
+            player: game.blue.clone(),
+            card: blue_card,
+            action: ActionKind::Swap(0),
+        };
+        game.action(a3).unwrap();
+        
+        // Swap für gelben Spieler – triggert Verteilung
+        let yellow_card = game.yellow.cards[0].clone();
+        let a4 = Action {
+            player: game.yellow.clone(),
+            card: yellow_card,
+            action: ActionKind::Swap(0),
+        };
+        game.action(a4).unwrap();
+        
+        // Prüfe Verteilung an Teammates (verwende die echten Karten)
+        assert!(game.blue.cards.contains(&red_card));     // Red -> Blue
+        assert!(game.yellow.cards.contains(&green_card)); // Green -> Yellow
+        assert!(game.red.cards.contains(&blue_card));     // Blue -> Red
+        assert!(game.green.cards.contains(&yellow_card)); // Yellow -> Green
+        
+        // Buffer geleert, Phase beendet
+        assert_eq!(game.swap_buffer.len(), 0);
+        assert!(!game.swapping_phase);
+    }
+}
