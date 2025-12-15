@@ -158,57 +158,81 @@ impl DogGame for Game {
             ActionKind::Move(_, _) => todo!(),
 
             ActionKind::Split(ref sub_moves) => {
-                match _card {
-                    Card::Seven | Card::Joker => {},
-                    _ => return Err("Split is only allowed with 7 or Joker."),
-                }
+    match _card {
+        Card::Seven | Card::Joker => {
+        }
+        _ => return Err("Split is only allowed with 7 or Joker."),
+    }
 
-                let total_steps: u8 = sub_moves.iter().map(|(_, steps)| steps).sum();
-                if total_steps != 7 {
-                    return Err("Total steps for split must be exactly 7.");
-                }
+    let total_steps: u8 = sub_moves
+        .iter()
+        .map(|(_, steps)| steps)
+        .sum();
 
-                let current_player_color = self.current_player_color;
-                let mut temp_board = self.board.clone();
-                let mut beaten_pieces: Vec<(Color, u8)> = Vec::new();
-                for (from, steps) in sub_moves.iter().copied() {
-                    let piece = match temp_board.check_tile(from) {
-                        Some(p) => p,
-                        None => return Err("Cannot move from empty tile in split."),
-                    };
-                    if piece.color != current_player_color {
-                        return Err("Can only move own pieces.")
-                    }
-                    let target = match temp_board.calculate_target(from, steps as i8, current_player_color) {
-                        Some(t) => t,
-                        None => return Err("Move invalid: Target out of bounds."),
-                    };
-                    if let Some(target_piece) = temp_board.check_tile(target) {
-                        if target_piece.color == current_player_color {
-                            return Err("Cannot land on own piece.")
-                    
-                        }
-                    }
-                    let moving_piece = temp_board.tiles[from as usize].take().unwrap();
+    if total_steps != 7 {
+        return Err("Total steps for split must be exactly 7.");
+    }
 
-                    if let Some(beaten) = temp_board.tiles[target as usize].replace(moving_piece){
-                    beaten_pieces.push((beaten.color, beaten.id))                   
-                    }
-                    
-                }
+    let active_color = self.current_player_color;
 
-                    self.board = temp_board;
-                    for (color, id) in &beaten_pieces {
-                        self.player_mut_by_color(*color).return_piece_id(*id);
-                    }
-                    self.player_mut_by_color(current_player_color).remove_card(_card);
-                    self.discard.push(_card);
-                    let last_beaten_color = beaten_pieces.last().map(|(c, _)| *c);
-                    self.history.push(HistoryEntry { action: _action, beaten_piece_color: last_beaten_color, switched_piece_color: None, });
+    let mut tmp_board = self.board.clone();
 
-                    self.current_player_color = self.current_player_color.next();
-                    Ok(())
-            },
+    let mut beaten: Vec<(Color, u8)> = Vec::new();
+
+    for (from, steps) in sub_moves.iter().copied() {
+        let piece = match tmp_board.check_tile(from) {
+            Some(p) => p,
+            None => return Err("Cannot move from empty tile in split."),
+        };
+
+        if piece.color != active_color {
+            return Err("Can only move own pieces.");
+        }
+
+        let target = match tmp_board.calculate_target(from, steps as i8, active_color) {
+            Some(t) => t,
+            None => return Err("Move invalid: Target out of bounds."),
+        };
+
+        if let Some(other) = tmp_board.check_tile(target) {
+            if other.color == active_color {
+                return Err("Cannot land on own piece.");
+            }
+        }
+
+        let moving_piece = tmp_board.tiles[from as usize]
+            .take()
+            .expect("Checked tile above, should exist here");
+
+    
+        if let Some(hit_piece) = tmp_board.tiles[target as usize].replace(moving_piece) {
+            beaten.push((hit_piece.color, hit_piece.id));
+        }
+
+    }
+
+    self.board = tmp_board;
+
+    for (color, id) in &beaten {
+        self.player_mut_by_color(*color).return_piece_id(*id);
+    }
+
+    self.player_mut_by_color(active_color).remove_card(_card);
+    self.discard.push(_card);
+
+    let last_beaten_color = beaten.last().map(|(c, _)| *c);
+
+    self.history.push(HistoryEntry {
+        action: _action,
+        beaten_piece_color: last_beaten_color,
+        switched_piece_color: None,
+    });
+
+    self.current_player_color = self.current_player_color.next();
+
+    Ok(())
+},
+
 
             ActionKind::Switch(from, to) => {
 
