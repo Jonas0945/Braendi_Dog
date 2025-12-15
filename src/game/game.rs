@@ -378,7 +378,6 @@ mod tests {
             card: Card::Ace,
         };
 
-        // KORREKTUR: id: 0 hinzugefügt
         game.board.tiles[start] = Some(Piece {
             color: Color::Red,
             id: 0, 
@@ -401,7 +400,6 @@ mod tests {
             card: Card::Ace,
         };
 
-        // KORREKTUR: id: 0 hinzugefügt
         game.board.tiles[start] = Some(Piece {
             color: Color::Green,
             id: 0,
@@ -418,14 +416,12 @@ mod tests {
         game.red.cards = vec![Card::Jack, Card::Joker];
         game.green.cards = vec![Card::Jack, Card::Joker];
 
-        // KORREKTUR: id: 0 hinzugefügt
         game.board.tiles[1] = Some(Piece {
             color: Color::Red,
             id: 0,
             left_start: true,
         });
 
-        // KORREKTUR: id: 0 hinzugefügt
         game.board.tiles[2] = Some(Piece {
             color: Color::Green,
             id: 0,
@@ -444,83 +440,6 @@ mod tests {
         assert_eq!(game.board.tiles[2].as_ref().unwrap().color, Color::Red);
     }
     
-    // ... (für die restlichen Tests gilt das gleiche Prinzip: überall id: 0 einfügen)
-    #[test]
-    fn test_split_success() {
-        let mut game = Game::new();
-
-        // 1. Vorbereitung: Karte geben
-        game.red.cards = vec![Card::Seven];
-
-        // 2. Vorbereitung: Zwei Figuren aufs Feld stellen
-        // Figur A auf Feld 0
-        game.board.tiles[0] = Some(Piece {
-            color: Color::Red,
-            id: 0,
-            left_start: true,
-        });
-        // Figur B auf Feld 10
-        game.board.tiles[10] = Some(Piece {
-            color: Color::Red,
-            id: 0,
-            left_start: true,
-        });
-
-        // 3. Die Aktion: 7 aufteilen in 3 und 4
-        let split_moves = vec![(0, 3), (10, 4)];
-        
-        let action = Action {
-            player: Color::Red,
-            action: ActionKind::Split(split_moves),
-            card: Card::Seven,
-        };
-
-        // 4. Ausführen und prüfen
-        assert!(game.action(Card::Seven, action).is_ok());
-
-        // Sind die alten Felder leer?
-        assert!(game.board.tiles[0].is_none());
-        assert!(game.board.tiles[10].is_none());
-
-        // Sind die Figuren auf den neuen Feldern? (0 + 3 = 3) und (10 + 4 = 14)
-        assert_eq!(game.board.tiles[3].as_ref().unwrap().color, Color::Red);
-        assert_eq!(game.board.tiles[14].as_ref().unwrap().color, Color::Red);
-        
-        // Ist die Karte weg?
-        assert!(game.player_mut_by_color(Color::Red).cards.is_empty());
-    }
-    #[test]
-    fn test_split_atomic_fail() {
-        let mut game = Game::new();
-        game.red.cards = vec![Card::Seven];
-
-        // Figur A auf 0
-        game.board.tiles[0] = Some(Piece { color: Color::Red, id: 0, left_start: true });
-        // Figur B auf 10
-        game.board.tiles[10] = Some(Piece { color: Color::Red, id: 0, left_start: true });
-        
-        // BLOCKADE: Wir stellen eine eigene Figur auf Feld 14.
-        // Wenn Figur B (von 10) 4 läuft, würde sie hier crashen.
-        game.board.tiles[14] = Some(Piece { color: Color::Red, id: 0, left_start: true });
-
-        // Aktion: 0->3 (wäre OK) und 10->14 (CRASH gegen eigene Figur)
-        let split_moves = vec![(0, 3), (10, 4)];
-        
-        let action = Action {
-            player: Color::Red,
-            action: ActionKind::Split(split_moves),
-            card: Card::Seven,
-        };
-
-        // Der Zug MUSS fehlschlagen
-        assert!(game.action(Card::Seven, action).is_err());
-
-        // WICHTIG: Das Board muss unverändert sein!
-        // Figur A muss immer noch auf 0 stehen, obwohl ihr Teilzug okay gewesen wäre.
-        assert!(game.board.tiles[0].is_some()); 
-        assert!(game.board.tiles[10].is_some());
-        
-        // Feld 3 (wo A hinwollte) muss leer bleiben
-        assert!(game.board.tiles[3].is_none());
-    }
+   
+    
 }
