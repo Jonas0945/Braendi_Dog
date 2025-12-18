@@ -5,6 +5,6 @@ use super::action::*;
 pub struct HistoryEntry {
     pub action: Action,
     pub beaten_piece_color: Option<Color>,
-    pub switched_piece_color: Option<Color>,
+    pub interchanged_piece_color: Option<Color>,
 }
 
