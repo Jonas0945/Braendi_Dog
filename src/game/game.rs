@@ -224,7 +224,8 @@ impl DogGame for Game {
                             let mut moving_piece = self.board.tiles[from as usize].take().unwrap();
                             moving_piece.left_start = true;
                             let beaten_piece_color = if let Some(beaten) = self.board.tiles[to as usize].take() {
-                               self.player_mut_by_color(beaten.color).pieces_to_place += 1;
+                                self.player_mut_by_color(beaten.color)
+                                    .return_piece_id(beaten.id);
                                 Some(beaten.color)
                             } else {
                                 None
@@ -267,12 +268,22 @@ impl DogGame for Game {
                             .1[0]; //
                         in_house = true;
                     } else if in_house {
-                        nfrom += 1;
-                    } else {
+                    if nfrom == *PLAYER_HOUSE
+                        .iter()
+                        .find(|(c, _)| *c == current_player_color)
+                        .unwrap()
+                        .1
+                        .last()
+                        .unwrap()
+                    {
+                        return Err("Cannot move past end of house.");
+                    }
+                    nfrom += 1;
+                } else {
                         nfrom = (nfrom + 1) % 64;
                     }
 
-                    if let Some(p) = self.board.check_tile(nfrom) {
+                    if let Some(_p) = self.board.check_tile(nfrom) {
                         if in_house {
                             return Err("Cannot pass pieces in the house.");
                         } 
@@ -299,7 +310,8 @@ impl DogGame for Game {
                 let mut moving_piece = self.board.tiles[from as usize].take().unwrap();
                 moving_piece.left_start = true;
                 let beaten_piece_color = if let Some(beaten) = self.board.tiles[to as usize].take() {
-                    self.player_mut_by_color(beaten.color).pieces_to_place += 1;
+                    self.player_mut_by_color(beaten.color)
+                        .return_piece_id(beaten.id);
                     Some(beaten.color)
                 } else {
                     None
@@ -494,7 +506,7 @@ impl DogGame for Game {
                     let id_to_remove =self.player_mut_by_color(beaten_color).take_next_piece_id().unwrap();
                     self.board.tiles[start] = Some(Piece {
                         color: beaten_color,
-                        id: self.player_mut_by_color(beaten_color).take_next_piece_id().unwrap(),
+                        id: id_to_remove,
                         left_start: true,
                     });
                     self.player_mut_by_color(beaten_color).available_ids.retain(|&x| x == id_to_remove);
@@ -611,10 +623,6 @@ fn is_winner(&self) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-
-
-    
     #[test]
     fn test_steps_success() {
         let mut game = Game::new();
@@ -623,6 +631,7 @@ mod tests {
 
         game.board.tiles[0] = Some(Piece {
             color: Color::Red,
+            id: 0,
             left_start: true,
         });
 
@@ -646,6 +655,7 @@ mod tests {
 
         game.board.tiles[0] = Some(Piece {
             color: Color::Red,
+            id: 0,
             left_start: true,
         });
 
@@ -667,6 +677,7 @@ mod tests {
 
         game.board.tiles[0] = Some(Piece {
             color: Color::Green,
+            id: 0,
             left_start: true,
         });
 
@@ -681,36 +692,45 @@ mod tests {
 
     #[test]
     fn test_move_and_beat_opponent() {
-        let mut game = Game::new();
+    let mut game = Game::new();
 
-        game.red.cards = vec![Card::Two];
+    game.red.cards = vec![Card::Two];
 
-        game.board.tiles[0] = Some(Piece {
-            color: Color::Red,
-            left_start: true,
-        });
+    let red_id = game.player_mut_by_color(Color::Red)
+        .take_next_piece_id()
+        .unwrap();
+    let green_id = game.player_mut_by_color(Color::Green)
+        .take_next_piece_id()
+        .unwrap();
 
-        game.board.tiles[2] = Some(Piece {
-            color: Color::Green,
-            left_start: true,
-        });
+    game.board.tiles[0] = Some(Piece {
+        color: Color::Red,
+        id: red_id,
+        left_start: true,
+    });
 
-        let green_pieces_before =
-            game.player_mut_by_color(Color::Green).pieces_to_place;
+    game.board.tiles[2] = Some(Piece {
+        color: Color::Green,
+        id: green_id,
+        left_start: true,
+    });
 
-        let action = Action {
-            player: Color::Red,
-            action: ActionKind::Move(0, 2),
-            card: Card::Two,
-        };
+    let green_before =
+        game.player_mut_by_color(Color::Green).pieces_to_place();
 
-        assert!(game.action(Card::Two, action).is_ok());
-        assert_eq!(game.board.tiles[2].as_ref().unwrap().color, Color::Red);
-        assert_eq!(
-            game.player_mut_by_color(Color::Green).pieces_to_place,
-            green_pieces_before + 1
-        );
-    }
+    let action = Action {
+        player: Color::Red,
+        action: ActionKind::Move(0, 2),
+        card: Card::Two,
+    };
+
+    assert!(game.action(Card::Two, action).is_ok());
+    assert_eq!(game.board.tiles[2].as_ref().unwrap().color, Color::Red);
+    assert_eq!(
+        game.player_mut_by_color(Color::Green).pieces_to_place(),
+        green_before + 1
+    );
+}
 
     #[test]
     fn test_move_from_empty_tile_fails() {
@@ -731,7 +751,7 @@ mod tests {
         let mut game = Game::new();
         game.red.cards = vec![Card::Ace];
 
-        game.board.tiles[0] = Some(Piece { color: Color::Red, left_start: true });
+        game.board.tiles[0] = Some(Piece { color: Color::Red, id: 0,left_start: true });
 
         let action = Action {
             player: Color::Red,
@@ -746,7 +766,7 @@ mod tests {
         let mut game = Game::new();
         game.red.cards = vec![Card::Ace];
 
-        game.board.tiles[0] = Some(Piece { color: Color::Red, left_start: true });
+        game.board.tiles[0] = Some(Piece { color: Color::Red, id: 0,left_start: true });
 
         let action = Action {
             player: Color::Red,
