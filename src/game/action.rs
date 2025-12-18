@@ -124,6 +124,7 @@ impl Display for Action {
             ActionKind::Place => format!("P"),
             ActionKind::Move(from, to) => format!("M {from} {to}"),
             ActionKind::Switch(from, to) => format!("S {from} {to}"),
+            ActionKind::Swap(_) => todo!(),
         };
 
         write!(f, "{player_str} {card_str} {action_str}")
