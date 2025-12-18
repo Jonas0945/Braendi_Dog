@@ -18,6 +18,7 @@ pub enum ActionKind {
     Switch(Point, Point),
     Split(Vec<(Point, u8)>), 
 
+    Exchange,
 }
 
 impl FromStr for Action {
@@ -27,10 +28,11 @@ impl FromStr for Action {
     /// "G 0 P" - Green places piece with Joker (= 0)
     /// "Y 4 M 16 20" - Yellow moves from 16 to 20 with 4
     /// "B 11 S 40 45" - Blue switches between 40 and 45 with Jack (= 11)
+    /// "Y 0 E" - Yellow wants so exchange his/her Joker with Green
     
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split_whitespace().collect();
-        if parts.len() < 4 {
+        if parts.len() < 3 {
             return Err("Invalid action format");
         }
         
@@ -88,6 +90,14 @@ impl FromStr for Action {
 
                 ActionKind::Switch(from, to)
             }
+
+            "E" => {
+                if parts.len() != 3 {
+                    return Err("Invalid exchange format");
+                }
+
+                ActionKind::Exchange
+            }
             _ => return Err("Invalid action type"),
         };
 
@@ -131,6 +141,7 @@ impl Display for Action {
                     .collect();
                 format!("SPLIT {}", details.join(""))
             }
+            ActionKind::Exchange => format!("E"),
         };
 
         write!(f, "{player_str} {card_str} {action_str}")

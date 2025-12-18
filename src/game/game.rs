@@ -264,11 +264,61 @@ impl DogGame for Game {
 
                 Ok(())
             },
+
+            ActionKind::Exchange => todo!(),
         }
     }
     
     fn undo(&mut self) -> Result<(), &'static str> {
-        todo!()
+        let entry= self.history.pop().ok_or("No action to undo")?;
+
+        match entry.action.action {
+            ActionKind::Place => {
+                let player = entry.action.player;
+                let start = Board::start_field(player) as usize;
+
+                self.board.tiles[start].take();
+                self.player_mut_by_color(player).pieces_to_place += 1;
+
+                if let Some(beaten_color) = entry.beaten_piece_color {
+                    self.board.tiles[start] = Some(Piece {
+                        color: beaten_color,
+                        left_start: true,
+                    });
+
+                    self.player_mut_by_color(beaten_color).pieces_to_place -= 1;
+                }
+
+                let card = entry.action.card;
+                self.discard.pop();
+                self.player_mut_by_color(player).cards.push(card);
+
+                self.current_player_color = player;
+            },
+
+            ActionKind::Switch(from, to) => {
+                let player = entry.action.player;
+
+                let from_index = from as usize;
+                let to_index = to as usize;
+
+                let a = self.board.tiles[from_index].take();
+                let b = self.board.tiles[to_index].take();
+
+                self.board.tiles[from_index] = b;
+                self.board.tiles[to_index] = a;
+
+                let card = entry.action.card;
+                self.discard.pop();
+                self.player_mut_by_color(player).cards.push(card);
+
+                self.current_player_color = player;
+            }
+            ActionKind::Move(_, _) => todo!(),
+            ActionKind::Exchange => todo!(),
+        }
+
+        Ok(())
     }
     
     fn board(&self) -> &[Option<Piece>; 80] {
