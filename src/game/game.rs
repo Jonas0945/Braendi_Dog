@@ -146,8 +146,8 @@ impl DogGame for Game {
 
             ActionKind::Move(from, to) => {
                 match _card {
-                    Card::Jack => {},
-                    _ => return Err("Cannot move piece with this card."),
+                    Card::Jack => return Err("Cannot move piece with this card."),
+                    _ => {}
                 }
 
                 let current_player_color = self.current_player_color;
@@ -179,6 +179,9 @@ impl DogGame for Game {
                     if !house.contains(&to) {
                         return Err("Cannot move into another player's house.");
                     }
+                    if !from_piece.left_start {
+                        return Err("Piece has not left start and cant enter house yet");
+                    }
                     into_house = true;
                 }
 
@@ -205,7 +208,8 @@ impl DogGame for Game {
                         }
 
                         if allow_backwards && nfrom == to {
-                            let moving_piece = self.board.tiles[from as usize].take().unwrap();
+                            let mut moving_piece = self.board.tiles[from as usize].take().unwrap();
+                            moving_piece.left_start = true;
                             let beaten_piece_color = if let Some(beaten) = self.board.tiles[to as usize].take() {
                                 self.player_mut_by_color(beaten.color).pieces_to_place += 1;
                                 Some(beaten.color)
@@ -306,7 +310,8 @@ impl DogGame for Game {
                     }
                 }
                 
-                let moving_piece = self.board.tiles[from as usize].take().unwrap();
+                let mut moving_piece = self.board.tiles[from as usize].take().unwrap();
+                moving_piece.left_start = true;
                 let beaten_piece_color = if let Some(beaten) = self.board.tiles[to as usize].take() {
                     self.player_mut_by_color(beaten.color).pieces_to_place += 1;
                     Some(beaten.color)
@@ -423,6 +428,150 @@ impl DogGame for Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_steps_success() {
+        let mut game = Game::new();
+
+        game.red.cards = vec![Card::Two];
+
+        game.board.tiles[0] = Some(Piece {
+            color: Color::Red,
+            left_start: true,
+        });
+
+        let action = Action {
+            player: Color::Red,
+            action: ActionKind::Move(0, 2),
+            card: Card::Two,
+        };
+
+        assert!(game.action(Card::Two, action).is_ok());
+        assert!(game.board.tiles[0].is_none());
+        assert_eq!(game.board.tiles[2].as_ref().unwrap().color, Color::Red);
+        assert_eq!(game.current_player_color, Color::Green);
+    }
+
+    #[test]
+    fn test_move_wrong_distance_fails() {
+        let mut game = Game::new();
+
+        game.red.cards = vec![Card::Two];
+
+        game.board.tiles[0] = Some(Piece {
+            color: Color::Red,
+            left_start: true,
+        });
+
+        let action = Action {
+            player: Color::Red,
+            action: ActionKind::Move(0, 3),
+            card: Card::Two,
+        };
+
+        assert!(game.action(Card::Two, action).is_err());
+        assert!(game.board.tiles[0].is_some());
+    }
+
+    #[test]
+    fn test_move_opponent_piece_fails() {
+        let mut game = Game::new();
+
+        game.red.cards = vec![Card::Two];
+
+        game.board.tiles[0] = Some(Piece {
+            color: Color::Green,
+            left_start: true,
+        });
+
+        let action = Action {
+            player: Color::Red,
+            action: ActionKind::Move(0, 2),
+            card: Card::Two,
+        };
+
+        assert!(game.action(Card::Two, action).is_err());
+    }
+
+    #[test]
+    fn test_move_and_beat_opponent() {
+        let mut game = Game::new();
+
+        game.red.cards = vec![Card::Two];
+
+        game.board.tiles[0] = Some(Piece {
+            color: Color::Red,
+            left_start: true,
+        });
+
+        game.board.tiles[2] = Some(Piece {
+            color: Color::Green,
+            left_start: true,
+        });
+
+        let green_pieces_before =
+            game.player_mut_by_color(Color::Green).pieces_to_place;
+
+        let action = Action {
+            player: Color::Red,
+            action: ActionKind::Move(0, 2),
+            card: Card::Two,
+        };
+
+        assert!(game.action(Card::Two, action).is_ok());
+        assert_eq!(game.board.tiles[2].as_ref().unwrap().color, Color::Red);
+        assert_eq!(
+            game.player_mut_by_color(Color::Green).pieces_to_place,
+            green_pieces_before + 1
+        );
+    }
+
+    #[test]
+    fn test_move_from_empty_tile_fails() {
+        let mut game = Game::new();
+
+        game.red.cards = vec![Card::Two];
+
+        let action = Action {
+            player: Color::Red,
+            action: ActionKind::Move(0, 2),
+            card: Card::Two,
+        };
+
+        assert!(game.action(Card::Two, action).is_err());
+    }
+    #[test]
+    fn test_ace_move_one_step() {
+        let mut game = Game::new();
+        game.red.cards = vec![Card::Ace];
+
+        game.board.tiles[0] = Some(Piece { color: Color::Red, left_start: true });
+
+        let action = Action {
+            player: Color::Red,
+            action: ActionKind::Move(0, 1),
+            card: Card::Ace,
+        };
+
+        assert!(game.action(Card::Ace, action).is_ok());
+    }
+    #[test]
+    fn test_ace_move_eleven_steps() {
+        let mut game = Game::new();
+        game.red.cards = vec![Card::Ace];
+
+        game.board.tiles[0] = Some(Piece { color: Color::Red, left_start: true });
+
+        let action = Action {
+            player: Color::Red,
+            action: ActionKind::Move(0, 11),
+            card: Card::Ace,
+        };
+
+        assert!(game.action(Card::Ace, action).is_ok());
+    }
+
+
 
     #[test]
     fn test_place_on_empty_start() {
