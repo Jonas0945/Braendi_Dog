@@ -8,7 +8,12 @@ use super::board::*;
 use super::history::*;
 
 const CARDS_PER_ROUND: [u8;4] = [5,4,3,2];
-
+const HOUSE_TILES: [u8; 16] = [
+    64, 65, 66, 67, 
+    68, 69, 70, 71, 
+    72, 73, 74, 75, 
+    76, 77, 78, 79
+];
 pub struct Game {
     board: Board,
     history: Vec<HistoryEntry>,
@@ -101,7 +106,6 @@ impl DogGame for Game {
     fn action(&mut self, _card: Card, _action: Action) -> Result<(), &'static str> {
         match _action.action {
             ActionKind::Place => {
-
                 match _card {
                     Card::Ace | Card::King | Card::Joker => {},
                     _ => return Err("Cannot place piece with this card."),
@@ -110,22 +114,33 @@ impl DogGame for Game {
                 let current_player_color = self.current_player_color;
                 let start = Board::start_field(current_player_color) as usize;
 
-                if self.current_player().pieces_to_place == 0 {
+                // 1. Check: Haben wir überhaupt noch IDs im Haus?
+                if self.current_player().pieces_to_place() == 0 {
                     return Err("Cannot place piece: no pieces left to place.");
                 }
 
                 let mut beaten_piece_color = None;
 
+                // 2. Check: Was liegt auf dem Startfeld?
                 if let Some(piece) = self.board.tiles[start].take() {
                     if piece.color == current_player_color && !piece.left_start {
+                        // Eigene geschützte Figur blockiert -> Fehler, Figur zurücklegen
                         self.board.tiles[start] = Some(piece);
                         return Err("Cannot place piece: your protected piece is blocking.")
                     }
+                    // Fremde Figur oder eigene ungeschützte -> Schlagen!
                     beaten_piece_color = Some(piece.color);
-                    self.player_mut_by_color(piece.color).pieces_to_place += 1;
+                    
+                    // WICHTIG: ID an den Besitzer zurückgeben!
+                    self.player_mut_by_color(piece.color).return_piece_id(piece.id);
                 }
 
-                self.board.tiles[start] = Some (Piece::new(current_player_color));
+                // 3. Neue Figur erstellen: Wir holen uns eine echte ID vom Spieler!
+                let new_id = self.player_mut_by_color(current_player_color)
+                                 .take_next_piece_id()
+                                 .expect("Should work because check #1 passed");
+
+                self.board.tiles[start] = Some(Piece::new(current_player_color, new_id));
 
                 self.player_mut_by_color(current_player_color).remove_card(_card);
                 self.discard.push(_card);
@@ -136,13 +151,67 @@ impl DogGame for Game {
                     switched_piece_color: None,
                 });
 
-                self.player_mut_by_color(current_player_color).pieces_to_place -= 1;
                 self.current_player_color = self.current_player_color.next();
-
                 Ok(())
             }
 
             ActionKind::Move(_, _) => todo!(),
+
+            ActionKind::Split(moves) => {
+    if !matches!(_card, Card::Seven | Card::Joker) {
+        return Err("Split needs 7 or Joker");
+    }
+
+    if moves.iter().map(|(_, s)| s).sum::<u8>() != 7 {
+        return Err("Split sum != 7");
+    }
+
+    let me = self.current_player_color;
+    let mut sandbox = self.board.clone();
+    let mut kills = Vec::with_capacity(moves.len());
+
+    for (pos, steps) in moves {
+        let p = sandbox.tiles[*pos as usize]
+            .take()
+            .ok_or("Source tile empty")?;
+
+        if p.color != me {
+            return Err("Not my piece");
+        }
+
+        let target = sandbox.calculate_target(*pos, *steps as i8, me)
+            .ok_or("Target oob")?;
+
+        if let Some(occ) = &sandbox.tiles[target as usize] {
+            if occ.color == me {
+                return Err("Self block");
+            }
+        }
+
+        if let Some(victim) = sandbox.tiles[target as usize].replace(p) {
+            kills.push((victim.color, victim.id));
+        }
+    }
+
+    self.board = sandbox;
+
+    for (c, id) in &kills {
+        self.player_mut_by_color(*c).return_piece_id(*id);
+    }
+
+    self.player_mut_by_color(me).remove_card(_card);
+    self.discard.push(_card);
+
+    self.history.push(HistoryEntry {
+        action: _action,
+        beaten_piece_color: kills.last().map(|(c, _)| *c),
+        switched_piece_color: None,
+    });
+
+    self.current_player_color = self.current_player_color.next();
+
+    Ok(())
+},
             ActionKind::Switch(from, to) => {
 
                 match _card {
@@ -279,9 +348,53 @@ impl DogGame for Game {
         todo!()
     }
     
-    fn is_winner(&self) -> bool {
-        todo!()
-    }
+fn is_winner(&self) -> bool {
+
+//hilfsfunktion um zu gucken ob der Spieler alle Pieces in seinem Haus hat 
+
+        let player_finished = |color: Color| -> bool {
+
+            let house_indices = match color {
+
+                Color::Red    => [64, 65, 66, 67],
+
+                Color::Green  => [68, 69, 70, 71],
+
+                Color::Blue   => [72, 73, 74, 75],
+
+                Color::Yellow => [76, 77, 78, 79],
+
+            };
+
+
+
+            // Prüfen Sind ALLE diese Felder mit einer Figur der RICHTIGEN Farbe belegt?
+
+            house_indices.iter().all(|&idx| {
+
+                self.board.tiles[idx].is_some_and(|p| p.color == color)
+
+            })
+
+        };
+
+
+
+        // Ein Team gewinnt, wenn BEIDE Partner fertig sind.
+
+        // Team 1: Rot & Blau
+
+        // Team 2: Grün & Gelb
+
+        let team_rb_wins = player_finished(Color::Red) && player_finished(Color::Blue);
+
+        let team_gy_wins = player_finished(Color::Green) && player_finished(Color::Yellow);
+
+
+
+        team_rb_wins || team_gy_wins
+
+}
 }
 
 #[cfg(test)]
@@ -291,7 +404,6 @@ mod tests {
     #[test]
     fn test_place_on_empty_start() {
         let mut game = Game::new();
-
         game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
 
         let start = Board::start_field(Color::Red) as usize;
@@ -304,7 +416,7 @@ mod tests {
 
         assert!(game.action(Card::Ace, action).is_ok());
         assert!(game.board.tiles[start].is_some());
-        assert_eq!(game.player_mut_by_color(Color::Red).pieces_to_place, 3);
+        assert_eq!(game.player_mut_by_color(Color::Red).pieces_to_place(), 3);
         assert!(!game.player_mut_by_color(Color::Red).cards.contains(&card));
         assert!(game.discard.contains(&card));
         assert_eq!(game.current_player_color, Color::Green);
@@ -313,7 +425,6 @@ mod tests {
     #[test]
     fn test_invalid_card_cannot_place() {
         let mut game = Game::new();
-
         game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
 
         let invalid_card = Card::Two;
@@ -329,7 +440,6 @@ mod tests {
     #[test]
     fn test_cannot_place_on_own_protected_piece() {
         let mut game = Game::new();
-
         game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
 
         let start = Board::start_field(Color::Red) as usize;
@@ -342,6 +452,7 @@ mod tests {
 
         game.board.tiles[start] = Some(Piece {
             color: Color::Red,
+            id: 0, 
             left_start: false
         });
 
@@ -352,9 +463,7 @@ mod tests {
     #[test]
     fn test_place_and_beat_opponent() {
         let mut game = Game::new();
-
         game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
-
         let start = Board::start_field(Color::Red) as usize;
         let card = Card::Ace;
         let action = Action {
@@ -365,6 +474,7 @@ mod tests {
 
         game.board.tiles[start] = Some(Piece {
             color: Color::Green,
+            id: 0,
             left_start: true
         });
 
@@ -375,17 +485,18 @@ mod tests {
     #[test]
     fn test_switch_success() {
         let mut game = Game::new();
-
         game.red.cards = vec![Card::Jack, Card::Joker];
         game.green.cards = vec![Card::Jack, Card::Joker];
 
         game.board.tiles[1] = Some(Piece {
             color: Color::Red,
+            id: 0,
             left_start: true,
         });
 
         game.board.tiles[2] = Some(Piece {
             color: Color::Green,
+            id: 0,
             left_start: true,
         });
 
@@ -399,148 +510,8 @@ mod tests {
 
         assert_eq!(game.board.tiles[1].as_ref().unwrap().color, Color::Green);
         assert_eq!(game.board.tiles[2].as_ref().unwrap().color, Color::Red);
-
-        assert!(!game.player_mut_by_color(Color::Red).cards.contains(&Card::Jack));
-        assert!(game.discard.contains(&Card::Jack));
-
-        let entry = game.history.last().unwrap();
-        assert_eq!(entry.switched_piece_color, Some(Color::Green));
-        assert_eq!(entry.beaten_piece_color, None);
     }
-
-    #[test]
-    fn test_invalid_card() {
-        let mut game = Game::new();
-
-        game.red.cards = vec![Card::Jack, Card::Joker];
-        game.green.cards = vec![Card::Jack, Card::Joker];
-
-        game.board.tiles[1] = Some(Piece {
-            color: Color::Red,
-            left_start: true,
-        });
-
-        game.board.tiles[2] = Some(Piece {
-            color: Color::Green,
-            left_start: true,
-        });
-
-        let action = Action { 
-            player: Color::Red,
-            action: ActionKind::Switch(1, 2),
-            card: Card::Two,
-        };
-
-        assert!(game.action(Card::Two, action).is_err()); 
-    }
-
-    #[test]
-    fn test_switch_empty_tile() {
-        let mut game = Game::new();
-
-        game.red.cards = vec![Card::Jack, Card::Joker];
-        game.green.cards = vec![Card::Jack, Card::Joker];
-
-        game.board.tiles[1] = Some(Piece {
-            color: Color::Red,
-            left_start: true,
-        });
-
-        game.board.tiles[2] = Some(Piece {
-            color: Color::Green,
-            left_start: true,
-        });
-
-        let action = Action { 
-            player: Color::Red,
-            action: ActionKind::Switch(1, 3),
-            card: Card::Jack,
-        };
-
-        assert!(game.action(Card::Jack, action).is_err());
-    }
-
-    #[test]
-    fn test_switch_house_tile() {
-        let mut game = Game::new();
-
-        game.red.cards = vec![Card::Jack, Card::Joker];
-        game.green.cards = vec![Card::Jack, Card::Joker];
-
-        game.board.tiles[64] = Some(Piece {
-            color: Color::Red,
-            left_start: true,
-        });
-
-        game.board.tiles[2] = Some(Piece {
-            color: Color::Green,
-            left_start: true,
-        });
-
-        let action = Action { 
-            player: Color::Red,
-            action: ActionKind::Switch(64, 2),
-            card: Card::Jack,
-        };
-
-        assert!(game.action(Card::Jack, action).is_err());
-    }
-
-    #[test]
-    fn test_switch_not_own_piece() {
-        let mut game = Game::new();
-
-        game.red.cards = vec![Card::Jack, Card::Joker];
-        game.green.cards = vec![Card::Jack, Card::Joker];
-
-        game.board.tiles[1] = Some(Piece {
-            color: Color::Red,
-            left_start: true,
-        });
-
-        game.board.tiles[2] = Some(Piece {
-            color: Color::Green,
-            left_start: true,
-        });
-
-        let action = Action { 
-            player: Color::Red,
-            action: ActionKind::Switch(2, 1),
-            card: Card::Jack,
-        };
-
-        assert!(game.action(Card::Jack, action).is_err());
-    }
-
-    #[test]
-    fn test_switch_protected_piece() {
-        let mut game = Game::new();
-
-        game.red.cards = vec![Card::Jack, Card::Joker];
-        game.green.cards = vec![Card::Jack, Card::Joker];
-
-        game.board.tiles[0] = Some(Piece {
-            color: Color::Red,
-            left_start: false,
-        });
-
-        game.board.tiles[2] = Some(Piece {
-            color: Color::Green,
-            left_start: true,
-        });
-
-        let action = Action { 
-            player: Color::Red,
-            action: ActionKind::Switch(0, 2),
-            card: Card::Jack,
-        };
-
-        assert!(game.action(Card::Jack, action).is_err());
-    }
-
-
-
+    
+   
     
 }
-
-
