@@ -950,44 +950,83 @@ fn test_undo_place_restores_state() {
     assert_eq!(g.current_player().color, Color::Red);
 }
 
-#[test]
-fn test_undo_switch_restores_tiles_and_card() {
-    let mut g = Game::new();
-
-    // prepare two pieces on board at non-house positions 0 and 1
-    let from = 0u8;
-    let to = 1u8;
-
-    // Put a Red piece at 'from' and a Green piece at 'to'
-    g.board.tiles[from as usize] = Some(Piece::new_test(Color::Red, 0, true));
-    g.board.tiles[to as usize] = Some(Piece::new_test(Color::Green, 1, true));
-
-    // give Red a Jack to perform switch
-    g.player_mut_by_color(Color::Red).cards.push(Card::Jack);
-
-    let action = Action { player: Color::Red, card: Card::Jack, action: ActionKind::Switch(from, to) };
-    assert!(g.action(Card::Jack, action.clone()).is_ok());
-
-    // tiles should be swapped
-    let after_from = g.board.check_tile(from).unwrap();
-    let after_to = g.board.check_tile(to).unwrap();
-    assert_eq!(after_from.color, Color::Green);
-    assert_eq!(after_to.color, Color::Red);
-
-    // undo the switch
-    assert!(g.undo().is_ok());
-
-    // tiles back to original
-    let back_from = g.board.check_tile(from).unwrap();
-    let back_to = g.board.check_tile(to).unwrap();
-    assert_eq!(back_from.color, Color::Red);
-    assert_eq!(back_to.color, Color::Green);
-
-    // card returned to Red
-    assert!(g.player_mut_by_color(Color::Red).cards.contains(&Card::Jack));
-
-    // current player reset to Red
-    assert_eq!(g.current_player().color, Color::Red);
-}
-
-}
+    #[test]
+    fn test_undo_switch_restores_tiles_and_card() {
+        let mut g = Game::new();
+    
+        // prepare two pieces on board at non-house positions 0 and 1
+        let from = 0u8;
+        let to = 1u8;
+    
+        // Put a Red piece at 'from' and a Green piece at 'to'
+        g.board.tiles[from as usize] = Some(Piece::new_test(Color::Red, 0, true));
+        g.board.tiles[to as usize] = Some(Piece::new_test(Color::Green, 1, true));
+    
+        // give Red a Jack to perform switch
+        g.player_mut_by_color(Color::Red).cards.push(Card::Jack);
+    
+        let action = Action { player: Color::Red, card: Card::Jack, action: ActionKind::Switch(from, to) };
+        assert!(g.action(Card::Jack, action.clone()).is_ok());
+    
+        // tiles should be swapped
+        let after_from = g.board.check_tile(from).unwrap();
+        let after_to = g.board.check_tile(to).unwrap();
+        assert_eq!(after_from.color, Color::Green);
+        assert_eq!(after_to.color, Color::Red);
+    
+        // undo the switch
+        assert!(g.undo().is_ok());
+    
+        // tiles back to original
+        let back_from = g.board.check_tile(from).unwrap();
+        let back_to = g.board.check_tile(to).unwrap();
+        assert_eq!(back_from.color, Color::Red);
+        assert_eq!(back_to.color, Color::Green);
+    
+        // card returned to Red
+        assert!(g.player_mut_by_color(Color::Red).cards.contains(&Card::Jack));
+    
+        // current player reset to Red
+        assert_eq!(g.current_player().color, Color::Red);
+    }
+       #[test]
+    fn double_swap_by_same_player_through_index(){
+        let mut game = Game::new();
+        game.new_round();
+        game.red.swapped_cards_count +=1;
+        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Swap(3),};
+        assert_eq!(game.round, 1);
+        // assert!(game.action(Card::Eight, a1).is_err());
+    assert_eq!(game.action(Card::Eight, a1).unwrap_err(), "Dieser Spieler darf keine Karte tauschen");
+    }
+    #[test]
+    fn swapping_in_not_swap_phase(){
+        let mut game = Game::new();
+        game.new_round();
+        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Swap(3),};
+        game.swapping_phase = false;
+        // assert!(game.action(Card::Eight, a1).is_err());
+    assert_eq!(game.action(Card::Eight, a1).unwrap_err(), "In dieser Phase des Spiels dürfen keine Karten getauscht werden");
+    }
+    #[test]
+    fn double_swap_by_same_player(){
+        let mut game = Game::new();
+        game.new_round();
+        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Swap(3),};
+        game.action(Card::Seven, a1).expect("Es darf pro Spieler nur eine Karte getauscht werden");
+        //nur zu test zwecken
+        game.red.swapped_cards_count =0;
+        let a2=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Swap(4),};
+        // assert!(game.action(Card::Eight, a1).is_err());
+    assert_eq!(game.action(Card::Eight, a2).unwrap_err(), "Es darf pro Spieler nur eine Karte getauscht werden");
+    }
+    #[test]
+    fn swapping_index_overflow(){
+        let mut game = Game::new();
+        game.new_round();
+        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Swap(5),};
+    assert_eq!(game.action(Card::Eight, a1).unwrap_err(), "Ungültiger Kartenindex für den Tausch");
+    }
+    
+    }
+    }
