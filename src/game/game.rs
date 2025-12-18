@@ -496,20 +496,23 @@ impl DogGame for Game {
             ActionKind::Place => {
                 let player = entry.action.player;
                 let start = Board::start_field(player) as usize;
-                if let Some(piece_on_start) = self.board.tiles[start].take() {
-                    self.player_mut_by_color(player).return_piece_id(piece_on_start.id);
-                } else {
-                    return Err("No piece on start tile");
-                    //Impossible if undoing Place
+
+                if let Some(piece) = self.board.tiles[start].take() {
+                    self.player_mut_by_color(player).return_piece_id(piece.id);
                 }
+
                 if let Some(beaten_color) = entry.beaten_piece_color {
-                    let id_to_remove =self.player_mut_by_color(beaten_color).take_next_piece_id().unwrap();
+                    let restored_id = self.player_mut_by_color(beaten_color)
+                        .take_next_piece_id()
+                        .expect("Beaten player needs ID");
+
                     self.board.tiles[start] = Some(Piece {
                         color: beaten_color,
-                        id: id_to_remove,
+                        id: restored_id, 
                         left_start: true,
                     });
-                    self.player_mut_by_color(beaten_color).available_ids.retain(|&x| x == id_to_remove);
+                    
+                    
                 }
 
                 let card = entry.action.card;
@@ -518,7 +521,6 @@ impl DogGame for Game {
 
                 self.current_player_color = player;
             },
-
             ActionKind::Switch(from, to) => {
                 let player = entry.action.player;
 
@@ -1048,6 +1050,45 @@ fn test_undo_place_restores_state() {
         let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Exchange(5),};
     assert_eq!(game.action(Card::Eight, a1).unwrap_err(), "Ungültiger Kartenindex für den Tausch");
     }
+
+    fn test_undo_place_with_capture() {
+    let mut game = Game::new();
+    let start = Board::start_field(Color::Red) as usize;
+
+    // 1. Situation vorbereiten: Eine GRÜNE Figur steht auf dem Startfeld von Rot
+    game.board.tiles[start] = Some(Piece {
+        color: Color::Green,
+        id: 0,
+        left_start: true
+    });
+    // Grün hat ID 0 benutzt, also entfernen wir sie aus seinem Vorrat, damit der Test realistisch ist
+    game.green.available_ids = vec![1, 2, 3]; 
+
+    // 2. Rot kommt raus (und schlägt Grün)
+    let action = Action {
+        player: Color::Red,
+        action: ActionKind::Place,
+        card: Card::Ace,
+    };
+    game.red.cards.push(Card::Ace);
+    
+    assert!(game.action(Card::Ace, action).is_ok());
+
+    // Jetzt müsste Rot auf dem Feld stehen und Grün im Haus (mit allen 4 IDs wieder verfügbar)
+    assert_eq!(game.board.tiles[start].as_ref().unwrap().color, Color::Red);
+    assert_eq!(game.green.available_ids.len(), 4); // Weil die geschlagene ID zurückgegeben wurde
+
+    // 3. UNDO ausführen
+    assert!(game.undo().is_ok());
+
+    // 4. Prüfen: Ist die Grüne Figur wieder da?
+    let restored_piece = game.board.tiles[start].as_ref().expect("Green piece should be restored");
+    assert_eq!(restored_piece.color, Color::Green);
+
+    // 5. DAS WIRD FEHLSCHLAGEN mit deinem Code:
+    // Grün sollte jetzt wieder 3 IDs im Vorrat haben (weil ID 0 auf dem Brett steht)
+    assert_eq!(game.green.available_ids.len(), 3, "Green should have 3 IDs left, but logic destroyed them");
+}
     
     }
     
