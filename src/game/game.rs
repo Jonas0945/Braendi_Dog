@@ -157,61 +157,62 @@ impl DogGame for Game {
 
             ActionKind::Move(_, _) => todo!(),
 
-            ActionKind::Split(moves) => {
-    if !matches!(_card, Card::Seven | Card::Joker) {
-        return Err("Split needs 7 or Joker");
-    }
+            ActionKind::Split(ref moves) => {
+                if !matches!(_card, Card::Seven | Card::Joker) {
+                    return Err("Split needs 7 or Joker");
+                }
 
-    if moves.iter().map(|(_, s)| s).sum::<u8>() != 7 {
-        return Err("Split sum != 7");
-    }
+                if moves.iter().map(|(_, s)| s).sum::<u8>() != 7 {
+                    return Err("Split sum != 7");
+                }
 
-    let me = self.current_player_color;
-    let mut sandbox = self.board.clone();
-    let mut kills = Vec::with_capacity(moves.len());
+                let me = self.current_player_color;
+                let mut sandbox = self.board.clone();
+                let mut kills = Vec::with_capacity(moves.len());
 
-    for (pos, steps) in moves {
-        let p = sandbox.tiles[*pos as usize]
-            .take()
-            .ok_or("Source tile empty")?;
+                for &(pos, steps) in moves {
+                    let p = sandbox.tiles[pos as usize]
+                        .take()
+                        .ok_or("Source tile empty")?;
 
-        if p.color != me {
-            return Err("Not my piece");
-        }
+                    if p.color != me {
+                        return Err("Not my piece");
+                    }
 
-        let target = sandbox.calculate_target(*pos, *steps as i8, me)
-            .ok_or("Target oob")?;
+                    let target = sandbox.calculate_target(pos, steps as i8, me)
+                        .ok_or("Target oob")?;
 
-        if let Some(occ) = &sandbox.tiles[target as usize] {
-            if occ.color == me {
-                return Err("Self block");
-            }
-        }
+                    if let Some(occ) = &sandbox.tiles[target as usize] {
+                        if occ.color == me {
+                            return Err("Self block");
+                        }
+                    }
 
-        if let Some(victim) = sandbox.tiles[target as usize].replace(p) {
-            kills.push((victim.color, victim.id));
-        }
-    }
+                    if let Some(victim) = sandbox.tiles[target as usize].replace(p) {
+                        kills.push((victim.color, victim.id));
+                    }
+                }
 
-    self.board = sandbox;
+                self.board = sandbox;
 
-    for (c, id) in &kills {
-        self.player_mut_by_color(*c).return_piece_id(*id);
-    }
+                for (c, id) in  &kills {
+                    self.player_mut_by_color(*c).return_piece_id(*id);
+                }
 
-    self.player_mut_by_color(me).remove_card(_card);
-    self.discard.push(_card);
+                self.player_mut_by_color(me).remove_card(_card);
+                self.discard.push(_card);
 
-    self.history.push(HistoryEntry {
-        action: _action,
-        beaten_piece_color: kills.last().map(|(c, _)| *c),
-        switched_piece_color: None,
-    });
+                self.history.push(HistoryEntry {
+                    action: _action,
+                    beaten_piece_color: kills.last().map(|(c, _)| *c),
+                    switched_piece_color: None,
+                });
 
-    self.current_player_color = self.current_player_color.next();
+                self.current_player_color = self.current_player_color.next();
 
-    Ok(())
-},
+                Ok(())
+            },
+            
             ActionKind::Switch(from, to) => {
 
                 match _card {
@@ -276,17 +277,20 @@ impl DogGame for Game {
             ActionKind::Place => {
                 let player = entry.action.player;
                 let start = Board::start_field(player) as usize;
-
-                self.board.tiles[start].take();
-                self.player_mut_by_color(player).pieces_to_place += 1;
-
+                if let Some(piece_on_start) = self.board.tiles[start].take() {
+                    self.player_mut_by_color(player).return_piece_id(piece_on_start.id);
+                } else {
+                    return Err("No piece on start tile");
+                    //Impossible if undoing Place
+                }
                 if let Some(beaten_color) = entry.beaten_piece_color {
+                    let id_to_remove =self.player_mut_by_color(beaten_color).take_next_piece_id().unwrap();
                     self.board.tiles[start] = Some(Piece {
                         color: beaten_color,
+                        id: self.player_mut_by_color(beaten_color).take_next_piece_id().unwrap(),
                         left_start: true,
                     });
-
-                    self.player_mut_by_color(beaten_color).pieces_to_place -= 1;
+                    self.player_mut_by_color(beaten_color).avaiable_ids.retain(|&x| x == id_to_remove);
                 }
 
                 let card = entry.action.card;
@@ -316,6 +320,7 @@ impl DogGame for Game {
             }
             ActionKind::Move(_, _) => todo!(),
             ActionKind::Exchange => todo!(),
+            ActionKind::Split(_) => todo!(),
         }
 
         Ok(())
@@ -401,6 +406,9 @@ fn is_winner(&self) -> bool {
 mod tests {
     use super::*;
 
+
+
+    
     #[test]
     fn test_place_on_empty_start() {
         let mut game = Game::new();
@@ -512,6 +520,125 @@ mod tests {
         assert_eq!(game.board.tiles[2].as_ref().unwrap().color, Color::Red);
     }
     
-   
+   #[test]
+   fn test_undo_place() {
+       let mut game = Game::new();
+       game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
+
+       let start = Board::start_field(Color::Red) as usize;
+       let card = Card::Ace;
+       let action = Action {
+           player: Color::Red,
+           action: ActionKind::Place,
+           card: Card::Ace,
+       };
+
+       assert!(game.action(Card::Ace, action).is_ok());
+       assert!(game.undo().is_ok());
+       assert!(game.board.tiles[start].is_none());
+       assert_eq!(game.player_mut_by_color(Color::Red).pieces_to_place(), 4);
+       assert!(game.player_mut_by_color(Color::Red).cards.contains(&card));
+       assert!(!game.discard.contains(&card));
+       assert_eq!(game.current_player_color, Color::Red);
+   }
+
+   #[test]
+    fn test_undo_switch() {
+       let mut game = Game::new();
+       game.red.cards = vec![Card::Jack, Card::Joker];
+
+       game.board.tiles[1] = Some(Piece {
+           color: Color::Red,
+           id: 0,
+           left_start: true,
+       });
+
+       game.board.tiles[2] = Some(Piece {
+           color: Color::Green,
+           id: 0,
+           left_start: true,
+       });
+
+       let action = Action { 
+           player: Color::Red,
+           action: ActionKind::Switch(1, 2),
+           card: Card::Jack,
+       };
+
+       assert!(game.action(Card::Jack, action).is_ok());
+       assert!(game.undo().is_ok());
+
+       assert_eq!(game.board.tiles[1].as_ref().unwrap().color, Color::Red);
+       assert_eq!(game.board.tiles[2].as_ref().unwrap().color, Color::Green);
     
+    }
+    
+#[test]
+fn test_undo_place_restores_state() {
+    let mut g = Game::new();
+
+    // give Red a card to place
+    g.player_mut_by_color(Color::Red).cards.push(Card::Ace);
+
+    // perform place
+    let action = Action { player: Color::Red, card: Card::Ace, action: ActionKind::Place };
+    assert!(g.action(Card::Ace, action.clone()).is_ok());
+
+    // piece should now be on start
+    let start = Board::start_field(Color::Red) as usize;
+    assert!(g.board_state()[start].is_some());
+
+    // undo
+    assert!(g.undo().is_ok());
+
+    // start should be empty again
+    assert!(g.board_state()[start].is_none());
+
+    // card returned to player's hand
+    assert!(g.player_mut_by_color(Color::Red).cards.contains(&Card::Ace));
+
+    // current player reset to Red
+    assert_eq!(g.current_player().color, Color::Red);
+}
+
+#[test]
+fn test_undo_switch_restores_tiles_and_card() {
+    let mut g = Game::new();
+
+    // prepare two pieces on board at non-house positions 0 and 1
+    let from = 0u8;
+    let to = 1u8;
+
+    // Put a Red piece at 'from' and a Green piece at 'to'
+    g.board.tiles[from as usize] = Some(Piece::new_test(Color::Red, 0, true));
+    g.board.tiles[to as usize] = Some(Piece::new_test(Color::Green, 1, true));
+
+    // give Red a Jack to perform switch
+    g.player_mut_by_color(Color::Red).cards.push(Card::Jack);
+
+    let action = Action { player: Color::Red, card: Card::Jack, action: ActionKind::Switch(from, to) };
+    assert!(g.action(Card::Jack, action.clone()).is_ok());
+
+    // tiles should be swapped
+    let after_from = g.board.check_tile(from).unwrap();
+    let after_to = g.board.check_tile(to).unwrap();
+    assert_eq!(after_from.color, Color::Green);
+    assert_eq!(after_to.color, Color::Red);
+
+    // undo the switch
+    assert!(g.undo().is_ok());
+
+    // tiles back to original
+    let back_from = g.board.check_tile(from).unwrap();
+    let back_to = g.board.check_tile(to).unwrap();
+    assert_eq!(back_from.color, Color::Red);
+    assert_eq!(back_to.color, Color::Green);
+
+    // card returned to Red
+    assert!(g.player_mut_by_color(Color::Red).cards.contains(&Card::Jack));
+
+    // current player reset to Red
+    assert_eq!(g.current_player().color, Color::Red);
+}
+
 }
