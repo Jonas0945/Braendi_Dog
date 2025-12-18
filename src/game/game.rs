@@ -255,7 +255,7 @@ impl DogGame for Game {
 
                     actual_steps += 1;
 
-                    if !in_house && nfrom == Board::house_entry_for(current_player_color) && into_house {
+                    if !in_house && nfrom == Board::start_field(current_player_color) && into_house {
                         nfrom = PLAYER_HOUSE
                             .iter()
                             .find(|(c, _)| *c == current_player_color)
