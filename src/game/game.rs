@@ -28,6 +28,8 @@ pub struct Game {
     yellow: Player,
 
     current_player_color: Color,
+    swapping_phase: true,
+    swap_buffer: Vec::new(),
 }
 
 impl Game {
@@ -425,7 +427,51 @@ impl DogGame for Game {
                 Ok(())
             },
 
-            ActionKind::Exchange => todo!(),
+            ActionKind::Exchange(card_index) => {
+            let playercolor = _action.player;
+            let swapping_player;
+            match playercolor {
+                Color::Red => swapping_player = &self.red   ,
+                Color::Green => swapping_player = &self.green,
+                Color::Blue => swapping_player = &self.blue,
+                Color::Yellow => swapping_player = &self.yellow,
+            }
+            //muss um 1 inkrementiert werde, da nach erstem mal karten austeilen round = 1 ist. 
+            if swapping_player.swapped_cards_count+1 == self.round{
+                if self.swapping_phase{
+                    if self.swap_buffer.iter().any(|(p, _)| p.color == playercolor){
+                        return Err("Es darf pro Spieler nur eine Karte getauscht werden")
+                    }
+                    if card_index >= swapping_player.cards.len() {
+                        return Err("Ungültiger Kartenindex für den Tausch")
+                    }
+
+                    self.swap_buffer.push((swapping_player.clone(), swapping_player.cards.get(card_index).unwrap().clone()));
+                    
+                    match playercolor {
+                        Color::Red => {self.red.cards.remove(card_index); self.red.swapped_cards_count +=1;},
+                        Color::Green => {self.green.cards.remove(card_index); self.green.swapped_cards_count +=1;},
+                        Color::Blue => {self.blue.cards.remove(card_index); self.blue.swapped_cards_count +=1;},
+                        Color::Yellow => {self.yellow.cards.remove(card_index); self.yellow.swapped_cards_count +=1;},
+}
+                    if self.swap_buffer.len()==4 {
+                            for (p, c) in self.swap_buffer.drain(..){
+                                match p.teammate() {
+                                Color::Red => self.red.cards.push(c),
+                                Color::Green => self.green.cards.push(c),
+                                Color::Blue => self.blue.cards.push(c),
+                                Color::Yellow => self.yellow.cards.push(c),
+                            }
+                            }  
+                        self.swapping_phase = false;
+                        
+                        return Ok(())
+                    }
+                }else {
+                    return  Err("In dieser Phase des Spiels dürfen keine Karten getauscht werden");
+                }
+            } else  {return  Err("Dieser Spieler darf keine Karte tauschen") };
+        Ok(())},
         }
     }
     
