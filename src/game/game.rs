@@ -133,7 +133,7 @@ impl DogGame for Game {
                 self.history.push(HistoryEntry {
                     action: _action,
                     beaten_piece_color,
-                    switched_piece_color: None,
+                    interchanged_piece_color: None,
                 });
 
                 self.player_mut_by_color(current_player_color).pieces_to_place -= 1;
@@ -143,25 +143,25 @@ impl DogGame for Game {
             }
 
             ActionKind::Move(_, _) => todo!(),
-            ActionKind::Switch(from, to) => {
+            ActionKind::Interchange(from, to) => {
 
                 match _card {
                     Card::Jack | Card::Joker => {},
-                    _ => return Err("Cannot switch pieces with this card."),
+                    _ => return Err("Cannot Interchange pieces with this card."),
                 }
 
                 let from_piece = match self.board.check_tile(from) {
                     Some(p) => p.clone(),
-                    None => return Err("Cannot switch from an empty tile."),
+                    None => return Err("Cannot Interchange from an empty tile."),
                 };
 
                 let to_piece = match self.board.check_tile(to) {
                     Some(p) => p.clone(),
-                    None => return Err("Cannot switch to an empty tile."),
+                    None => return Err("Cannot Interchange to an empty tile."),
                 };
 
                 if HOUSE_TILES.contains(&from) || HOUSE_TILES.contains(&to) {
-                    return Err("Cannot switch pieces inside player's houses.");
+                    return Err("Cannot Interchange pieces inside player's houses.");
                 }
 
                 let current_player_color = self.current_player_color;
@@ -171,13 +171,13 @@ impl DogGame for Game {
                 }
 
                 if !from_piece.left_start || !to_piece.left_start {
-                    return Err("Cannot switch with protected piece.")
+                    return Err("Cannot Interchange with protected piece.")
                 }
 
                 let from_index = from as usize;
                 let to_index = to as usize;
 
-                let switched_color = to_piece.color;
+                let interchanged_color = to_piece.color;
 
                 self.board.tiles[from_index] = Some(to_piece);
                 self.board.tiles[to_index] = Some(from_piece);
@@ -188,7 +188,7 @@ impl DogGame for Game {
                 self.history.push(HistoryEntry {
                     action: _action,
                     beaten_piece_color: None,
-                    switched_piece_color: Some(switched_color),
+                    interchanged_piece_color: Some(interchanged_color),
                 });
                 
                 self.current_player_color = self.current_player_color.next();
@@ -196,7 +196,7 @@ impl DogGame for Game {
                 Ok(())
             },
 
-            ActionKind::Exchange => todo!(),
+            ActionKind::Trade => todo!(),
         }
     }
     
@@ -227,7 +227,7 @@ impl DogGame for Game {
                 self.current_player_color = player;
             },
 
-            ActionKind::Switch(from, to) => {
+            ActionKind::Interchange(from, to) => {
                 let player = entry.action.player;
 
                 let from_index = from as usize;
@@ -246,7 +246,7 @@ impl DogGame for Game {
                 self.current_player_color = player;
             }
             ActionKind::Move(_, _) => todo!(),
-            ActionKind::Exchange => todo!(),
+            ActionKind::Trade => todo!(),
         }
 
         Ok(())
@@ -373,7 +373,7 @@ mod tests {
     }
 
     #[test]
-    fn test_switch_success() {
+    fn test_interchange_success() {
         let mut game = Game::new();
 
         game.red.cards = vec![Card::Jack, Card::Joker];
@@ -391,7 +391,7 @@ mod tests {
 
         let action = Action { 
             player: Color::Red,
-            action: ActionKind::Switch(1, 2),
+            action: ActionKind::Interchange(1, 2),
             card: Card::Jack,
         };
 
@@ -404,7 +404,7 @@ mod tests {
         assert!(game.discard.contains(&Card::Jack));
 
         let entry = game.history.last().unwrap();
-        assert_eq!(entry.switched_piece_color, Some(Color::Green));
+        assert_eq!(entry.interchanged_piece_color, Some(Color::Green));
         assert_eq!(entry.beaten_piece_color, None);
     }
 
@@ -427,7 +427,7 @@ mod tests {
 
         let action = Action { 
             player: Color::Red,
-            action: ActionKind::Switch(1, 2),
+            action: ActionKind::Interchange(1, 2),
             card: Card::Two,
         };
 
@@ -435,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn test_switch_empty_tile() {
+    fn test_interchange_empty_tile() {
         let mut game = Game::new();
 
         game.red.cards = vec![Card::Jack, Card::Joker];
@@ -453,7 +453,7 @@ mod tests {
 
         let action = Action { 
             player: Color::Red,
-            action: ActionKind::Switch(1, 3),
+            action: ActionKind::Interchange(1, 3),
             card: Card::Jack,
         };
 
@@ -461,7 +461,7 @@ mod tests {
     }
 
     #[test]
-    fn test_switch_house_tile() {
+    fn test_interchange_house_tile() {
         let mut game = Game::new();
 
         game.red.cards = vec![Card::Jack, Card::Joker];
@@ -479,7 +479,7 @@ mod tests {
 
         let action = Action { 
             player: Color::Red,
-            action: ActionKind::Switch(64, 2),
+            action: ActionKind::Interchange(64, 2),
             card: Card::Jack,
         };
 
@@ -487,7 +487,7 @@ mod tests {
     }
 
     #[test]
-    fn test_switch_not_own_piece() {
+    fn test_interchange_not_own_piece() {
         let mut game = Game::new();
 
         game.red.cards = vec![Card::Jack, Card::Joker];
@@ -505,7 +505,7 @@ mod tests {
 
         let action = Action { 
             player: Color::Red,
-            action: ActionKind::Switch(2, 1),
+            action: ActionKind::Interchange(2, 1),
             card: Card::Jack,
         };
 
@@ -513,7 +513,7 @@ mod tests {
     }
 
     #[test]
-    fn test_switch_protected_piece() {
+    fn test_interchange_protected_piece() {
         let mut game = Game::new();
 
         game.red.cards = vec![Card::Jack, Card::Joker];
@@ -531,7 +531,7 @@ mod tests {
 
         let action = Action { 
             player: Color::Red,
-            action: ActionKind::Switch(0, 2),
+            action: ActionKind::Interchange(0, 2),
             card: Card::Jack,
         };
 
