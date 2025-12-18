@@ -15,8 +15,8 @@ pub struct Action {
 pub enum ActionKind {
     Place,
     Move(Point, Point),
-    Switch(Point, Point),
-    Swap(usize),
+    Interchange(Point, Point),
+    Trade(usize),
 }
 
 impl FromStr for Action {
@@ -25,11 +25,12 @@ impl FromStr for Action {
     /// Example inputs:
     /// "G 0 P" - Green places piece with Joker (= 0)
     /// "Y 4 M 16 20" - Yellow moves from 16 to 20 with 4
-    /// "B 11 S 40 45" - Blue switches between 40 and 45 with Jack (= 11)
+    /// "B 11 I 40 45" - Blue interchangees between 40 and 45 with Jack (= 11)
+    /// "Y 0 T" - Yellow wants so trade his/her Joker with Green
     
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split_whitespace().collect();
-        if parts.len() < 4 {
+        if parts.len() < 3 {
             return Err("Invalid action format");
         }
         
@@ -77,15 +78,23 @@ impl FromStr for Action {
                 
                 ActionKind::Move(from, to)
             }
-            "S" => {
+            "I" => {
                 if parts.len() != 5 {
-                    return Err("Invalid move format");
+                    return Err("Invalid interchange format");
                 }
 
                 let from: Point = parts[3].parse().map_err(|_| "Invalid from point")?;
                 let to: Point = parts[4].parse().map_err(|_| "Invalid to point")?;
 
-                ActionKind::Switch(from, to)
+                ActionKind::Interchange(from, to)
+            }
+
+            "T" => {
+                if parts.len() != 3 {
+                    return Err("Invalid trade format");
+                }
+
+                ActionKind::Trade
             }
             _ => return Err("Invalid action type"),
         };
@@ -123,8 +132,8 @@ impl Display for Action {
         let action_str = match self.action {
             ActionKind::Place => format!("P"),
             ActionKind::Move(from, to) => format!("M {from} {to}"),
-            ActionKind::Switch(from, to) => format!("S {from} {to}"),
-            ActionKind::Swap(_) => todo!(),
+            ActionKind::Interchange(from, to) => format!("I {from} {to}"),
+            ActionKind::Trade(_) => format!("T"),
         };
 
         write!(f, "{player_str} {card_str} {action_str}")
