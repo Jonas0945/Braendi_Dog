@@ -18,7 +18,7 @@ pub enum ActionKind {
     Switch(Point, Point),
     Split(Vec<(Point, u8)>), 
 
-    Exchange,
+    Exchange(usize),
 }
 
 impl FromStr for Action {
@@ -96,7 +96,7 @@ impl FromStr for Action {
                     return Err("Invalid exchange format");
                 }
 
-                ActionKind::Exchange
+             todo!()  // ActionKind::Exchange(p)
             }
             _ => return Err("Invalid action type"),
         };
@@ -141,7 +141,7 @@ impl Display for Action {
                     .collect();
                 format!("SPLIT {}", details.join(""))
             }
-            ActionKind::Exchange => format!("E"),
+            ActionKind::Exchange(_) => format!("E"),
         };
 
         write!(f, "{player_str} {card_str} {action_str}")

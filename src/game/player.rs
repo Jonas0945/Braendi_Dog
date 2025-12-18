@@ -17,6 +17,7 @@ impl Player {
             available_ids: vec![0,1,2,3],            
             pieces_in_house: 0,
             cards: Vec::new(),
+            swapped_cards_count: 0,
         }
     }
 

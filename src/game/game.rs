@@ -28,8 +28,8 @@ pub struct Game {
     yellow: Player,
 
     current_player_color: Color,
-    swapping_phase: true,
-    swap_buffer: Vec::new(),
+    swapping_phase: bool,
+    swap_buffer: Vec<(Player, Card)>,
 }
 
 impl Game {
@@ -89,6 +89,8 @@ impl DogGame for Game {
             yellow: Player::new(Color::Yellow),
 
             current_player_color: Color::Red,
+             swapping_phase: true,
+    swap_buffer: Vec::new(),
         }
     }
 
@@ -222,7 +224,7 @@ impl DogGame for Game {
                             let mut moving_piece = self.board.tiles[from as usize].take().unwrap();
                             moving_piece.left_start = true;
                             let beaten_piece_color = if let Some(beaten) = self.board.tiles[to as usize].take() {
-                                self.player_mut_by_color(beaten.color).pieces_to_place += 1;
+                               self.player_mut_by_color(beaten.color).pieces_to_place += 1;
                                 Some(beaten.color)
                             } else {
                                 None
@@ -495,7 +497,7 @@ impl DogGame for Game {
                         id: self.player_mut_by_color(beaten_color).take_next_piece_id().unwrap(),
                         left_start: true,
                     });
-                    self.player_mut_by_color(beaten_color).avaiable_ids.retain(|&x| x == id_to_remove);
+                    self.player_mut_by_color(beaten_color).available_ids.retain(|&x| x == id_to_remove);
                 }
 
                 let card = entry.action.card;
@@ -524,7 +526,7 @@ impl DogGame for Game {
                 self.current_player_color = player;
             }
             ActionKind::Move(_, _) => todo!(),
-            ActionKind::Exchange => todo!(),
+            ActionKind::Exchange(_) => todo!(),
             ActionKind::Split(_) => todo!(),
         }
 
@@ -549,7 +551,6 @@ impl DogGame for Game {
             self.yellow.cards.push(self.deck.draw().unwrap());
         }
 
-        self.swap_cards();
         
         self.round += 1;
     }
@@ -994,7 +995,7 @@ fn test_undo_place_restores_state() {
         let mut game = Game::new();
         game.new_round();
         game.red.swapped_cards_count +=1;
-        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Swap(3),};
+        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Exchange(3),};
         assert_eq!(game.round, 1);
         // assert!(game.action(Card::Eight, a1).is_err());
     assert_eq!(game.action(Card::Eight, a1).unwrap_err(), "Dieser Spieler darf keine Karte tauschen");
@@ -1003,7 +1004,7 @@ fn test_undo_place_restores_state() {
     fn swapping_in_not_swap_phase(){
         let mut game = Game::new();
         game.new_round();
-        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Swap(3),};
+        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Exchange(3),};
         game.swapping_phase = false;
         // assert!(game.action(Card::Eight, a1).is_err());
     assert_eq!(game.action(Card::Eight, a1).unwrap_err(), "In dieser Phase des Spiels dürfen keine Karten getauscht werden");
@@ -1012,11 +1013,11 @@ fn test_undo_place_restores_state() {
     fn double_swap_by_same_player(){
         let mut game = Game::new();
         game.new_round();
-        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Swap(3),};
+        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Exchange(3),};
         game.action(Card::Seven, a1).expect("Es darf pro Spieler nur eine Karte getauscht werden");
         //nur zu test zwecken
         game.red.swapped_cards_count =0;
-        let a2=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Swap(4),};
+        let a2=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Exchange(4),};
         // assert!(game.action(Card::Eight, a1).is_err());
     assert_eq!(game.action(Card::Eight, a2).unwrap_err(), "Es darf pro Spieler nur eine Karte getauscht werden");
     }
@@ -1024,9 +1025,9 @@ fn test_undo_place_restores_state() {
     fn swapping_index_overflow(){
         let mut game = Game::new();
         game.new_round();
-        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Swap(5),};
+        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Exchange(5),};
     assert_eq!(game.action(Card::Eight, a1).unwrap_err(), "Ungültiger Kartenindex für den Tausch");
     }
     
     }
-    }
+    
