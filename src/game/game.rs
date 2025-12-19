@@ -444,9 +444,7 @@ impl DogGame for Game {
             },
 
             ActionKind::Exchange() => {
-                if _card != _action.card{
-                    return Err("Spieler kann diese Karte nicht tauschen");
-                }
+                
             let playercolor = _action.player;
             let card = _action.card;
             let swapping_player;
