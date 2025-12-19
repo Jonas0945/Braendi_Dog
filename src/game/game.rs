@@ -1,3 +1,5 @@
+use crate::game::card;
+
 use super::piece::*;
 use super::action::*;
 use super::color::*;
@@ -441,14 +443,21 @@ impl DogGame for Game {
                 Ok(())
             },
 
-            ActionKind::Exchange(card_index) => {
+            ActionKind::Exchange() => {
+
             let playercolor = _action.player;
+            let card = _action.card;
             let swapping_player;
             match playercolor {
                 Color::Red => swapping_player = &self.red   ,
                 Color::Green => swapping_player = &self.green,
                 Color::Blue => swapping_player = &self.blue,
                 Color::Yellow => swapping_player = &self.yellow,
+            }
+            let mut card_index = 0;
+            for x in swapping_player.cards.clone(){
+                if x == card { break; }
+                card_index+=1;
             }
             //muss um 1 inkrementiert werde, da nach erstem mal karten austeilen round = 1 ist. 
             if swapping_player.swapped_cards_count+1 == self.round{
@@ -540,7 +549,7 @@ impl DogGame for Game {
                 self.current_player_color = player;
             }
             ActionKind::Move(_, _) => todo!(),
-            ActionKind::Exchange(_) => todo!(),
+            ActionKind::Exchange() => todo!(),
             ActionKind::Split(_) => todo!(),
         }
 
@@ -1017,7 +1026,7 @@ fn test_undo_place_restores_state() {
         let mut game = Game::new();
         game.new_round();
         game.red.swapped_cards_count +=1;
-        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Exchange(3),};
+        let a1=Action{player: game.red.color, card: *game.red.cards.get(2).unwrap(), action: ActionKind::Exchange(),};
         assert_eq!(game.round, 1);
         // assert!(game.action(Card::Eight, a1).is_err());
     assert_eq!(game.action(Card::Eight, a1).unwrap_err(), "Dieser Spieler darf keine Karte tauschen");
@@ -1026,7 +1035,7 @@ fn test_undo_place_restores_state() {
     fn swapping_in_not_swap_phase(){
         let mut game = Game::new();
         game.new_round();
-        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Exchange(3),};
+        let a1=Action{player: game.red.color, card: *game.red.cards.get(2).unwrap(), action: ActionKind::Exchange(),};
         game.swapping_phase = false;
         // assert!(game.action(Card::Eight, a1).is_err());
     assert_eq!(game.action(Card::Eight, a1).unwrap_err(), "In dieser Phase des Spiels dürfen keine Karten getauscht werden");
@@ -1035,21 +1044,15 @@ fn test_undo_place_restores_state() {
     fn double_swap_by_same_player(){
         let mut game = Game::new();
         game.new_round();
-        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Exchange(3),};
+        let a1=Action{player: game.red.color, card: *game.red.cards.get(2).unwrap(), action: ActionKind::Exchange(),};
         game.action(Card::Seven, a1).expect("Es darf pro Spieler nur eine Karte getauscht werden");
         //nur zu test zwecken
         game.red.swapped_cards_count =0;
-        let a2=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Exchange(4),};
+        let a2=Action{player: game.red.color, card: *game.red.cards.get(1).unwrap(), action: ActionKind::Exchange(),};
         // assert!(game.action(Card::Eight, a1).is_err());
     assert_eq!(game.action(Card::Eight, a2).unwrap_err(), "Es darf pro Spieler nur eine Karte getauscht werden");
     }
-    #[test]
-    fn swapping_index_overflow(){
-        let mut game = Game::new();
-        game.new_round();
-        let a1=Action{player: game.red.color, card:Card::Eight, action: ActionKind::Exchange(5),};
-    assert_eq!(game.action(Card::Eight, a1).unwrap_err(), "Ungültiger Kartenindex für den Tausch");
-    }
+    
 
     fn test_undo_place_with_capture() {
     let mut game = Game::new();

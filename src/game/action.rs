@@ -18,7 +18,7 @@ pub enum ActionKind {
     Switch(Point, Point),
     Split(Vec<(Point, u8)>), 
 
-    Exchange(usize),
+    Exchange(),
 }
 
 impl FromStr for Action {
@@ -141,7 +141,7 @@ impl Display for Action {
                     .collect();
                 format!("SPLIT {}", details.join(""))
             }
-            ActionKind::Exchange(_) => format!("E"),
+            ActionKind::Exchange() => format!("E"),
         };
 
         write!(f, "{player_str} {card_str} {action_str}")
