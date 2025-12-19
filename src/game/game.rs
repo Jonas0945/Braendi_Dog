@@ -444,7 +444,9 @@ impl DogGame for Game {
             },
 
             ActionKind::Exchange() => {
-
+                if _card != _action.card{
+                    return Err("Spieler kann diese Karte nicht tauschen");
+                }
             let playercolor = _action.player;
             let card = _action.card;
             let swapping_player;
@@ -465,9 +467,7 @@ impl DogGame for Game {
                     if self.swap_buffer.iter().any(|(p, _)| p.color == playercolor){
                         return Err("Es darf pro Spieler nur eine Karte getauscht werden")
                     }
-                    if card_index >= swapping_player.cards.len() {
-                        return Err("Ungültiger Kartenindex für den Tausch")
-                    }
+                    
 
                     self.swap_buffer.push((swapping_player.clone(), swapping_player.cards.get(card_index).unwrap().clone()));
                     
