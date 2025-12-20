@@ -31,7 +31,7 @@ pub struct Game {
 
     current_player_color: Color,
     swapping_phase: bool,
-    swap_buffer: Vec<(Player, Card)>,
+    swap_buffer: Vec<(Color, Card)>,
 }
 
 impl Game {
@@ -462,12 +462,12 @@ impl DogGame for Game {
             //muss um 1 inkrementiert werde, da nach erstem mal karten austeilen round = 1 ist. 
             if swapping_player.swapped_cards_count+1 == self.round{
                 if self.swapping_phase{
-                    if self.swap_buffer.iter().any(|(p, _)| p.color == playercolor){
+                    if self.swap_buffer.iter().any(|(col, _)| *col == playercolor){
                         return Err("Es darf pro Spieler nur eine Karte getauscht werden")
                     }
                     
 
-                    self.swap_buffer.push((swapping_player.clone(), swapping_player.cards.get(card_index).unwrap().clone()));
+                    self.swap_buffer.push((playercolor, swapping_player.cards.get(card_index).unwrap().clone()));
                     
                     match playercolor {
                         Color::Red => {self.red.cards.remove(card_index); self.red.swapped_cards_count +=1;},
@@ -476,7 +476,13 @@ impl DogGame for Game {
                         Color::Yellow => {self.yellow.cards.remove(card_index); self.yellow.swapped_cards_count +=1;},
 }
                     if self.swap_buffer.len()==4 {
-                            for (p, c) in self.swap_buffer.drain(..){
+                            for (colo, c) in self.swap_buffer.drain(..){
+                                let p = match colo{
+                                    Color::Red => self.red.clone(),
+                                    Color::Green => self.green.clone(),
+                                    Color::Blue => self.blue.clone(),
+                                    Color::Yellow => self.yellow.clone(),
+                                };
                                 match p.teammate() {
                                 Color::Red => self.red.cards.push(c),
                                 Color::Green => self.green.cards.push(c),
