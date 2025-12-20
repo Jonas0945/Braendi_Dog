@@ -94,9 +94,11 @@ impl FromStr for Action {
             "E" => {
                 if parts.len() != 3 {
                     return Err("Invalid exchange format");
-                }
 
-             todo!()  // ActionKind::Exchange(p)
+                }
+                                    ActionKind::Exchange()
+
+
             }
             _ => return Err("Invalid action type"),
         };
