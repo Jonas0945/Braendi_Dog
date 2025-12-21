@@ -1,4 +1,4 @@
-use std::{fmt::{Display, Pointer}, str::FromStr, vec};
+use std::{fmt::Display, str::FromStr};
 
 use super::card::Card;
 use super::board::Point;
