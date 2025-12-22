@@ -16,6 +16,7 @@ pub enum ActionKind {
     Place,
     Move(Point, Point),
     Interchange(Point, Point),
+    Split(Point, Point),
     Trade,
 }
 
@@ -96,6 +97,17 @@ impl FromStr for Action {
 
                 ActionKind::Trade
             }
+
+            "S" => {
+                if parts.len() != 5 {
+                    return Err("Invalid split format");
+                }
+
+                let from: Point = parts[3].parse().map_err(|_| "Invalid from point")?;
+                let to: Point = parts[4].parse().map_err(|_| "Invalid to point")?;
+
+                ActionKind::Split(from, to)
+            }
             _ => return Err("Invalid action type"),
         };
 
@@ -134,6 +146,7 @@ impl Display for Action {
             ActionKind::Move(from, to) => format!("M {from} {to}"),
             ActionKind::Interchange(from, to) => format!("I {from} {to}"),
             ActionKind::Trade => format!("T"),
+            ActionKind::Split(from, to) => format!("S {from} {to}"),
         };
 
         write!(f, "{player_str} {card_str} {action_str}")
