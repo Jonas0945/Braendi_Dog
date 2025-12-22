@@ -15,6 +15,15 @@ impl Color {
             Color::Yellow => Color::Red,
         }
     }
+
+    pub fn teammate(self) -> Color {
+        match self {
+            Color::Red => Color::Blue,
+            Color::Green => Color::Yellow,
+            Color::Blue => Color::Red,
+            Color::Yellow => Color::Green,
+        }
+    }
 }
 
 

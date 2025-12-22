@@ -13,6 +13,9 @@ pub struct Game {
     board: Board,
     history: Vec<HistoryEntry>,
     round: u8,
+    
+    swapping_phase: bool,
+    swap_buffer: Vec<(Color,Card)>,
 
     deck: Deck,
     discard: Vec<Card>,
@@ -85,6 +88,9 @@ impl DogGame for Game {
             board: Board::new(),
             history: Vec::new(),
             round: 0,
+
+            swapping_phase: true,
+            swap_buffer: Vec::new(),
 
             deck: Deck::new(),
             discard: Vec::new(),
@@ -282,7 +288,39 @@ impl DogGame for Game {
                 Ok(())
             },
 
-            ActionKind::Trade => todo!(),
+            ActionKind::Trade => {
+                if !self.swapping_phase {
+                    return Err("Cannot trade cards outside swapping phase.");
+                }
+
+                let current_player_color = self.current_player_color;
+
+                if self.swap_buffer.len() >= 4 {
+                    return Err("Cannot trade more than one card per player.");
+                }
+
+                let card_index = self.player_mut_by_color(current_player_color).cards.iter().position(|&c| c == _card)
+                    .ok_or("Cannot trade: card not found in player's hand.")?;
+
+                let removed_card = self.player_mut_by_color(current_player_color).cards.remove(card_index);
+
+                self.swap_buffer.push((current_player_color, removed_card));
+
+                if self.swap_buffer.len() == 4 {
+                    let trades: Vec<_> = self.swap_buffer.drain(..).collect();
+
+                    for (col, c) in trades {
+                        let teammate_color = col.teammate();
+                        self.player_mut_by_color(teammate_color).cards.push(c);
+                    }
+                  self.swapping_phase = false;  
+                }
+
+                self.current_player_color = current_player_color.next();           
+
+                Ok(())
+            }
+
             ActionKind::Split(from, to) => {
                 match _card {
                     Card::Seven | Card::Joker => {},
@@ -1315,4 +1353,114 @@ mod tests {
         }
         
     }
+
+    mod trade_tests {
+        use std::vec;
+
+        use super::*;
+
+        #[test]
+        fn trade_succeeds() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Five, Card::Ten];
+            game.green.cards = vec![Card::Two, Card::Three];
+            game.blue.cards = vec![Card::Seven, Card::Eight];
+            game.yellow.cards = vec![Card::Nine, Card::Ten];
+
+            let action_red = Action {
+                player: Color::Red,
+                action: ActionKind::Trade,
+                card: Card::Five,
+            };
+
+            assert!(game.action(Card::Five, action_red).is_ok());
+            assert_eq!(game.red.cards.len(), 1);
+            assert_eq!(game.red.cards[0], Card::Ten);
+            assert_eq!(game.swap_buffer.len(), 1);
+
+            let action_green = Action {
+                player: Color::Green,
+                action: ActionKind::Trade,
+                card: Card::Two,
+            };
+
+            assert!(game.action(Card::Two, action_green).is_ok());
+            assert_eq!(game.green.cards.len(), 1);
+            assert_eq!(game.green.cards[0], Card::Three);
+            assert_eq!(game.swap_buffer.len(), 2);
+
+            let action_blue = Action {
+                player: Color::Blue,
+                action: ActionKind::Trade,
+                card: Card::Seven,
+            };
+
+            assert!(game.action(Card::Seven, action_blue).is_ok());
+            assert_eq!(game.blue.cards.len(), 1);
+            assert_eq!(game.blue.cards[0], Card::Eight);
+            assert_eq!(game.swap_buffer.len(), 3);
+
+            let action_yellow = Action {
+                player: Color::Yellow,
+                action: ActionKind::Trade,
+                card: Card::Nine,
+            };
+
+            assert!(game.action(Card::Nine, action_yellow).is_ok());
+
+            // Swap buffer is emptied and players get cards
+            assert!(game.swap_buffer.is_empty());
+            assert!(!game.swapping_phase);
+
+            assert_eq!(game.red.cards.len(), 2);
+            assert!(game.red.cards.contains(&Card::Seven));
+
+            assert_eq!(game.green.cards.len(), 2);
+            assert!(game.green.cards.contains(&Card::Nine));
+
+            assert_eq!(game.blue.cards.len(), 2);
+            assert!(game.blue.cards.contains(&Card::Five));
+
+            assert_eq!(game.yellow.cards.len(), 2);
+            assert!(game.yellow.cards.contains(&Card::Two));
+        }
+
+        #[test]
+        fn trade_outside_swapping_phase_fails() {
+             let mut game = Game::new();
+            game.swapping_phase = false;
+            game.current_player_color = Color::Red;
+
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Trade,
+                card: Card::Five,
+            };
+
+            assert!(game.action(Card::Five, action).is_err());
+        }
+
+        #[test]
+        fn trade_duplicate_card_fails() {
+            let mut game = Game::new();
+            
+            game.red.cards = vec![Card::Five, Card::Ten];
+
+            let action1 = Action {
+                player: Color::Red,
+                action: ActionKind::Trade,
+                card: Card::Five,
+            };
+            let action2 = Action {
+                player: Color::Red,
+                action: ActionKind::Trade,
+                card: Card::Ten,
+            };
+
+            assert!(game.action(Card::Five, action1).is_ok());
+            assert!(game.action(Card::Ten, action2).is_err());
+        }
+    }
+
 }
