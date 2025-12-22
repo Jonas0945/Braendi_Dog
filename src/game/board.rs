@@ -121,54 +121,80 @@ impl Board {
 
         let house = self.house_by_color(color);
 
+        // Piece already in house
         if from >= ring_size {
-            // Piece already in house
+            
             // Check correct in-house movement
             if !house.contains(&from) || !house.contains(&to) || to < from {
                 return None;
             }
 
-            Some ((to - from) as u8)
+            return Some(to - from);
+        }
+        
+        // Moving from the ring into the house
+        if to >= ring_size {
             
-        } else if to >= ring_size {
-            // Moving from the ring into the house
-
             if !house.contains(&to) {
                 return None; 
             }
 
             let house_entry = self.house_entry(color);
+
             let distance_to_house_entry = (house_entry + ring_size - from) % ring_size;
 
             let steps_in_house = to - self.house_gateway(color);
 
             // Total distance
-            Some(distance_to_house_entry as u8 + 1 + steps_in_house as u8)
+            return Some(distance_to_house_entry as u8 + 1 + steps_in_house as u8);
+        } 
+        
+        // Moving around the ring
+        else {
 
-        } else {
-
-            // Moving around the ring
-            Some(((to + ring_size - from) % ring_size) as u8)
+            let distance = (to + ring_size - from) % ring_size;
+            Some(distance as u8)
         }
     }
 
-    pub fn passed_tiles(&self, from: u8, to:u8, color: Color) -> Option<Vec<Point>> {
+    pub fn passed_tiles(&self, from: u8, to:u8, color: Color, backward: bool) -> Option<Vec<Point>> {
         let ring_size = 64;
-        let distance = self.distance_between(from, to, color)?;
         let mut tiles = Vec::new();
+        let mut current_position = from;
 
+        let distance = if backward {
+            self.distance_between(to, from, color)?
+        } else {
+            self.distance_between(from, to, color)?
+        };
+
+        // Piece already in house
         if from >= ring_size {
-            // Piece already in house
+            
+            // Backward move not allowed in-house
+            if backward {
+                return None;
+            }
 
-            for pos in from..= to {
+            for pos in (from + 1)..= to {
                 tiles.push(pos);
             }
 
-        } else if to >= ring_size {
-            // Moving from the ring into the house
+            return Some(tiles);
 
-            let mut current_position = from; 
+        
+        }
+        
+        // Moving from the ring into the house
+        if to >= ring_size {
+
+            // Backward move into house not allowed 
+            if backward {
+                return None;
+            }
+
             let house_entry = self.house_entry(color);
+            let house_gateway = self.house_gateway(color);
 
             // Add tiles to house entry
             while current_position != house_entry {
@@ -176,37 +202,39 @@ impl Board {
                 tiles.push(current_position);
             }
 
-            // Add tiles inside house 
-            let house = self.house_by_color(color);
+            // Add first tile in house
+            tiles.push(house_gateway);
 
-            for pos in house[0]..= to {
+            for pos in (house_gateway + 1)..= to {
                 tiles.push(pos);
             }
-        } else {
-            // Normal ring movement
 
-            let mut current_position = from;
+            return Some(tiles);
+        }
 
-            for _ in 0..distance {
-                current_position = (current_position + 1) % ring_size;
-                tiles.push(current_position);
-            }
+        // Normal ring movement   
+        for _ in 0..distance {
+            current_position = if backward {
+                (current_position + ring_size - 1) % ring_size
+            } else {
+                (current_position + 1) % ring_size
+            };
+            tiles.push(current_position);
         }
 
         Some(tiles)
     }
-  
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    mod distance_tests {
+    mod distance_between_tests {
         use super::*;
 
         #[test]
-        fn ring_only() {
+        fn ring() {
             let board = Board::new();
 
             assert_eq!(board.distance_between(0, 3, Color::Red), Some(3));
@@ -236,11 +264,12 @@ mod tests {
         }
 
         #[test]
-        fn wrong_direction_inside_house() {
+        fn invalid_positions() {
             let board = Board::new();
-            let house = board.house_by_color(Color::Green);
-
-            assert_eq!(board.distance_between(house[2], house[1], Color::Green), None);
+            
+            assert_eq!(board.distance_between(80, 0, Color::Red), None);
+            assert_eq!(board.distance_between(0, 80, Color::Red), None);
+            assert_eq!(board.distance_between(81, 90, Color::Blue), None);
         }
     }
     
@@ -248,28 +277,82 @@ mod tests {
         use super::*;
 
         #[test]
-        fn ring_only() {
+        fn ring_forward() {
             let board = Board::new();
-            let tiles = board.passed_tiles(60, 2, Color::Red).unwrap();
-            assert_eq!(tiles, vec![61, 62, 63, 0, 1, 2]);
+            
+            assert_eq!(
+                board.passed_tiles(0, 3, Color::Red, false),
+                Some(vec![1, 2, 3])
+            );
+            assert_eq!(
+                board.passed_tiles(62, 2, Color::Red, false),
+                Some(vec![63, 0, 1, 2])
+            );
         }
 
         #[test]
-        fn into_house() {
+        fn ring_backward() {
             let board = Board::new();
-            let tiles = board.passed_tiles(60, 66, Color::Red).unwrap();
-            assert_eq!(tiles, vec![61, 62, 63, 0, 64, 65, 66]);
+            
+            assert_eq!(
+                board.passed_tiles(3, 0, Color::Red, true),
+                Some(vec![2, 1, 0])
+            );
+            assert_eq!(
+                board.passed_tiles(2, 62, Color::Red, true),
+                Some(vec![1, 0, 63, 62])
+            );
         }
 
+        #[test]
+        fn inside_house_forward() {
+            let board = Board::new();
+            let house = board.house_by_color(Color::Blue);
 
+            assert_eq!(
+                board.passed_tiles(house[0], house[2], Color::Blue, false),
+                Some(vec![house[1], house[2]])
+            );
+        }
+
+        #[test]
+        fn inside_house_backward() {
+            let board = Board::new();
+            let house = board.house_by_color(Color::Blue);
+
+            assert_eq!(
+                board.passed_tiles(house[2], house[1], Color::Blue, true),
+                None
+            );
+        }
+
+        #[test]
+        fn into_house_forward() {
+            let board = Board::new();
+
+            assert_eq!(
+                board.passed_tiles(62, 64, Color::Red, false),
+                Some(vec![63, 0, 64])
+            );
+        }
+
+        #[test]
+        fn into_house_backward() {
+            let board = Board::new();
+
+            assert_eq!(
+                board.passed_tiles(64, 62, Color::Red, true),
+                None
+            );
+        }
+
+        #[test]
+        fn invalid_positions() {
+            let board = Board::new();
+            
+            assert_eq!(board.passed_tiles(80, 0, Color::Red, false), None);
+            assert_eq!(board.passed_tiles(0, 80, Color::Red, false), None);
+            assert_eq!(board.passed_tiles(81, 90, Color::Blue, false), None);
+        }
     }
-
-
-    
-
-
-
-
-
-
 }
