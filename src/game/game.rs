@@ -34,6 +34,18 @@ impl Game {
             Color::Yellow => &mut self.yellow,
         }
     }
+
+    pub fn can_card_move(&self, _card: Card, forward: Option<u8>, backward: Option<u8>) -> bool {
+        let distances = match _card.possible_distances() {
+            Some(d) => d,
+            None => return false,
+        };
+
+        let forward_ok = forward.map_or(false, |f| distances.contains(&f));
+        let backward_ok = backward.map_or(false, |b| distances.contains(&b));
+
+        forward_ok || backward_ok
+    }
 }
 
 
@@ -142,26 +154,98 @@ impl DogGame for Game {
                 Ok(())
             }
 
-            ActionKind::Move(_, _) => todo!(),
+            ActionKind::Move(from, to) => {
+                match _card {
+                    Card::Jack => return Err("Cannot move piece with Jack."),
+                    Card::Seven => return Err("Cannot move with Seven (-> Split)"),
+                    _ => {},
+                }
+
+                let current_player_color = self.current_player_color;
+                
+                let moving_piece = match self.board.check_tile(from) {
+                    Some(p) => p,
+                    None => return Err("Invalid move: no piece found."),
+                };
+
+                if moving_piece.color != current_player_color {
+                    return Err("You can only move your own piece.");
+                }
+
+                // Calculate distances and check if card allows the move
+                let forward_distance = self.board.distance_between(from, to, current_player_color);
+                let backward_distance = self.board.distance_between(to, from, current_player_color);
+
+                if !self.can_card_move(_card, forward_distance, backward_distance) {
+                    return Err("Move not allowed with this card")
+                };
+
+                // Calculate path + direction and check for blocking pieces
+                let is_backward = matches!(_card, Card::Four | Card::Joker)
+                    && backward_distance == Some(4);
+
+                let path = match self.board.passed_tiles(from, to, self.current_player_color, is_backward) {
+                    Some(p) => p,
+                    None => return Err("Invalid move: path cannot be calculated.")
+                };
+
+                for &tile in &path {
+                    if let Some(piece) = self.board.tiles[tile as usize] {
+                        if tile >= 64 {
+                            return Err("Cannot move past piece inside the house");
+                        } else if !piece.left_start {
+                            return Err("Cannot move past protected piece.");
+                        }
+                    }
+                }
+
+                //Move execution
+                let moving_piece = self.board.tiles[from as usize].take().unwrap();
+
+                // Remove piece from destination tile if opponent piece is there
+                let mut beaten_piece_color = None;
+
+                if let Some(beaten_piece) = self.board.tiles[to as usize].take() {
+                    beaten_piece_color = Some(beaten_piece.color);
+                    self.player_mut_by_color(beaten_piece.color).pieces_to_place += 1;
+                }
+
+                //Piece placement and history update
+                self.board.tiles[to as usize] = Some(moving_piece);
+
+                self.player_mut_by_color(current_player_color).remove_card(_card);
+                self.discard.push(_card);
+
+                self.history.push(HistoryEntry { 
+                    action: _action, 
+                    beaten_piece_color, 
+                    interchanged_piece_color: None 
+                });
+
+                self.current_player_color = self.current_player_color.next();        
+
+                Ok(())
+            },
+
             ActionKind::Interchange(from, to) => {
 
                 match _card {
                     Card::Jack | Card::Joker => {},
-                    _ => return Err("Cannot Interchange pieces with this card."),
+                    _ => return Err("Cannot interchange pieces with this card."),
                 }
 
                 let from_piece = match self.board.check_tile(from) {
                     Some(p) => p.clone(),
-                    None => return Err("Cannot Interchange from an empty tile."),
+                    None => return Err("Cannot interchange from an empty tile."),
                 };
 
                 let to_piece = match self.board.check_tile(to) {
                     Some(p) => p.clone(),
-                    None => return Err("Cannot Interchange to an empty tile."),
+                    None => return Err("Cannot interchange to an empty tile."),
                 };
 
                 if HOUSE_TILES.contains(&from) || HOUSE_TILES.contains(&to) {
-                    return Err("Cannot Interchange pieces inside player's houses.");
+                    return Err("Cannot interchange pieces inside player's houses.");
                 }
 
                 let current_player_color = self.current_player_color;
@@ -288,259 +372,525 @@ impl DogGame for Game {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_place_on_empty_start() {
-        let mut game = Game::new();
+    mod place_tests {
+        use super::*;
 
-        game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
+        #[test]
+        fn on_empty_start() {
+            let mut game = Game::new();
 
-        let start = Board::start_field(Color::Red) as usize;
-        let card = Card::Ace;
-        let action = Action {
-            player: Color::Red,
-            action: ActionKind::Place,
-            card: Card::Ace,
-        };
+            game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
 
-        assert!(game.action(Card::Ace, action).is_ok());
-        assert!(game.board.tiles[start].is_some());
-        assert_eq!(game.player_mut_by_color(Color::Red).pieces_to_place, 3);
-        assert!(!game.player_mut_by_color(Color::Red).cards.contains(&card));
-        assert!(game.discard.contains(&card));
-        assert_eq!(game.current_player_color, Color::Green);
+            let start = Board::start_field(Color::Red) as usize;
+            let card = Card::Ace;
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Place,
+                card: Card::Ace,
+            };
+
+            assert!(game.action(Card::Ace, action).is_ok());
+            assert!(game.board.tiles[start].is_some());
+            assert_eq!(game.player_mut_by_color(Color::Red).pieces_to_place, 3);
+            assert!(!game.player_mut_by_color(Color::Red).cards.contains(&card));
+            assert!(game.discard.contains(&card));
+            assert_eq!(game.current_player_color, Color::Green);
+        }
+
+        #[test]
+        fn invalid_card_cannot_place() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
+
+            let invalid_card = Card::Two;
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Place,
+                card: invalid_card
+            };
+
+            assert!(game.action(Card::Two, action).is_err());
+        }
+
+        #[test]
+        fn cannot_place_on_own_protected_piece() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
+
+            let start = Board::start_field(Color::Red) as usize;
+            let card = Card::Ace;
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Place,
+                card: Card::Ace,
+            };
+
+            game.board.tiles[start] = Some(Piece {
+                color: Color::Red,
+                left_start: false
+            });
+
+            assert!(game.action(card, action).is_err());
+            assert_eq!(game.board.tiles[start].as_ref().unwrap().color, Color::Red);
+        }
+
+        #[test]
+        fn beat_opponent() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
+
+            let start = Board::start_field(Color::Red) as usize;
+            let card = Card::Ace;
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Place,
+                card: Card::Ace,
+            };
+
+            game.board.tiles[start] = Some(Piece {
+                color: Color::Green,
+                left_start: true
+            });
+
+            assert!(game.action(card, action).is_ok());
+            assert_eq!(game.board.tiles[start].as_ref().unwrap().color, Color::Red);
+        }
     }
-
-    #[test]
-    fn test_invalid_card_cannot_place() {
-        let mut game = Game::new();
-
-        game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
-
-        let invalid_card = Card::Two;
-        let action = Action {
-            player: Color::Red,
-            action: ActionKind::Place,
-            card: invalid_card
-        };
-
-        assert!(game.action(Card::Two, action).is_err());
-    }
-
-    #[test]
-    fn test_cannot_place_on_own_protected_piece() {
-        let mut game = Game::new();
-
-        game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
-
-        let start = Board::start_field(Color::Red) as usize;
-        let card = Card::Ace;
-        let action = Action {
-            player: Color::Red,
-            action: ActionKind::Place,
-            card: Card::Ace,
-        };
-
-        game.board.tiles[start] = Some(Piece {
-            color: Color::Red,
-            left_start: false
-        });
-
-        assert!(game.action(card, action).is_err());
-        assert_eq!(game.board.tiles[start].as_ref().unwrap().color, Color::Red);
-    }
-
-    #[test]
-    fn test_place_and_beat_opponent() {
-        let mut game = Game::new();
-
-        game.red.cards = vec![Card::Ace, Card::King, Card::Joker];
-
-        let start = Board::start_field(Color::Red) as usize;
-        let card = Card::Ace;
-        let action = Action {
-            player: Color::Red,
-            action: ActionKind::Place,
-            card: Card::Ace,
-        };
-
-        game.board.tiles[start] = Some(Piece {
-            color: Color::Green,
-            left_start: true
-        });
-
-        assert!(game.action(card, action).is_ok());
-        assert_eq!(game.board.tiles[start].as_ref().unwrap().color, Color::Red);
-    }
-
-    #[test]
-    fn test_interchange_success() {
-        let mut game = Game::new();
-
-        game.red.cards = vec![Card::Jack, Card::Joker];
-        game.green.cards = vec![Card::Jack, Card::Joker];
-
-        game.board.tiles[1] = Some(Piece {
-            color: Color::Red,
-            left_start: true,
-        });
-
-        game.board.tiles[2] = Some(Piece {
-            color: Color::Green,
-            left_start: true,
-        });
-
-        let action = Action { 
-            player: Color::Red,
-            action: ActionKind::Interchange(1, 2),
-            card: Card::Jack,
-        };
-
-        assert!(game.action(Card::Jack, action).is_ok());
-
-        assert_eq!(game.board.tiles[1].as_ref().unwrap().color, Color::Green);
-        assert_eq!(game.board.tiles[2].as_ref().unwrap().color, Color::Red);
-
-        assert!(!game.player_mut_by_color(Color::Red).cards.contains(&Card::Jack));
-        assert!(game.discard.contains(&Card::Jack));
-
-        let entry = game.history.last().unwrap();
-        assert_eq!(entry.interchanged_piece_color, Some(Color::Green));
-        assert_eq!(entry.beaten_piece_color, None);
-    }
-
-    #[test]
-    fn test_invalid_card() {
-        let mut game = Game::new();
-
-        game.red.cards = vec![Card::Jack, Card::Joker];
-        game.green.cards = vec![Card::Jack, Card::Joker];
-
-        game.board.tiles[1] = Some(Piece {
-            color: Color::Red,
-            left_start: true,
-        });
-
-        game.board.tiles[2] = Some(Piece {
-            color: Color::Green,
-            left_start: true,
-        });
-
-        let action = Action { 
-            player: Color::Red,
-            action: ActionKind::Interchange(1, 2),
-            card: Card::Two,
-        };
-
-        assert!(game.action(Card::Two, action).is_err()); 
-    }
-
-    #[test]
-    fn test_interchange_empty_tile() {
-        let mut game = Game::new();
-
-        game.red.cards = vec![Card::Jack, Card::Joker];
-        game.green.cards = vec![Card::Jack, Card::Joker];
-
-        game.board.tiles[1] = Some(Piece {
-            color: Color::Red,
-            left_start: true,
-        });
-
-        game.board.tiles[2] = Some(Piece {
-            color: Color::Green,
-            left_start: true,
-        });
-
-        let action = Action { 
-            player: Color::Red,
-            action: ActionKind::Interchange(1, 3),
-            card: Card::Jack,
-        };
-
-        assert!(game.action(Card::Jack, action).is_err());
-    }
-
-    #[test]
-    fn test_interchange_house_tile() {
-        let mut game = Game::new();
-
-        game.red.cards = vec![Card::Jack, Card::Joker];
-        game.green.cards = vec![Card::Jack, Card::Joker];
-
-        game.board.tiles[64] = Some(Piece {
-            color: Color::Red,
-            left_start: true,
-        });
-
-        game.board.tiles[2] = Some(Piece {
-            color: Color::Green,
-            left_start: true,
-        });
-
-        let action = Action { 
-            player: Color::Red,
-            action: ActionKind::Interchange(64, 2),
-            card: Card::Jack,
-        };
-
-        assert!(game.action(Card::Jack, action).is_err());
-    }
-
-    #[test]
-    fn test_interchange_not_own_piece() {
-        let mut game = Game::new();
-
-        game.red.cards = vec![Card::Jack, Card::Joker];
-        game.green.cards = vec![Card::Jack, Card::Joker];
-
-        game.board.tiles[1] = Some(Piece {
-            color: Color::Red,
-            left_start: true,
-        });
-
-        game.board.tiles[2] = Some(Piece {
-            color: Color::Green,
-            left_start: true,
-        });
-
-        let action = Action { 
-            player: Color::Red,
-            action: ActionKind::Interchange(2, 1),
-            card: Card::Jack,
-        };
-
-        assert!(game.action(Card::Jack, action).is_err());
-    }
-
-    #[test]
-    fn test_interchange_protected_piece() {
-        let mut game = Game::new();
-
-        game.red.cards = vec![Card::Jack, Card::Joker];
-        game.green.cards = vec![Card::Jack, Card::Joker];
-
-        game.board.tiles[0] = Some(Piece {
-            color: Color::Red,
-            left_start: false,
-        });
-
-        game.board.tiles[2] = Some(Piece {
-            color: Color::Green,
-            left_start: true,
-        });
-
-        let action = Action { 
-            player: Color::Red,
-            action: ActionKind::Interchange(0, 2),
-            card: Card::Jack,
-        };
-
-        assert!(game.action(Card::Jack, action).is_err());
-    }
-
-
-
     
+    mod interchange_tests {
+        use super::*;
+
+        #[test]
+        fn interchange_success() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Jack, Card::Joker];
+            game.green.cards = vec![Card::Jack, Card::Joker];
+
+            game.board.tiles[1] = Some(Piece {
+                color: Color::Red,
+                left_start: true,
+            });
+
+            game.board.tiles[2] = Some(Piece {
+                color: Color::Green,
+                left_start: true,
+            });
+
+            let action = Action { 
+                player: Color::Red,
+                action: ActionKind::Interchange(1, 2),
+                card: Card::Jack,
+            };
+
+            assert!(game.action(Card::Jack, action).is_ok());
+
+            assert_eq!(game.board.tiles[1].as_ref().unwrap().color, Color::Green);
+            assert_eq!(game.board.tiles[2].as_ref().unwrap().color, Color::Red);
+
+            assert!(!game.player_mut_by_color(Color::Red).cards.contains(&Card::Jack));
+            assert!(game.discard.contains(&Card::Jack));
+
+            let entry = game.history.last().unwrap();
+            assert_eq!(entry.interchanged_piece_color, Some(Color::Green));
+            assert_eq!(entry.beaten_piece_color, None);
+        }
+
+        #[test]
+        fn invalid_card() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Jack, Card::Joker];
+            game.green.cards = vec![Card::Jack, Card::Joker];
+
+            game.board.tiles[1] = Some(Piece {
+                color: Color::Red,
+                left_start: true,
+            });
+
+            game.board.tiles[2] = Some(Piece {
+                color: Color::Green,
+                left_start: true,
+            });
+
+            let action = Action { 
+                player: Color::Red,
+                action: ActionKind::Interchange(1, 2),
+                card: Card::Two,
+            };
+
+            assert!(game.action(Card::Two, action).is_err()); 
+        }
+
+        #[test]
+        fn empty_tile() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Jack, Card::Joker];
+            game.green.cards = vec![Card::Jack, Card::Joker];
+
+            game.board.tiles[1] = Some(Piece {
+                color: Color::Red,
+                left_start: true,
+            });
+
+            game.board.tiles[2] = Some(Piece {
+                color: Color::Green,
+                left_start: true,
+            });
+
+            let action = Action { 
+                player: Color::Red,
+                action: ActionKind::Interchange(1, 3),
+                card: Card::Jack,
+            };
+
+            assert!(game.action(Card::Jack, action).is_err());
+        }
+
+        #[test]
+        fn house_tile() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Jack, Card::Joker];
+            game.green.cards = vec![Card::Jack, Card::Joker];
+
+            game.board.tiles[64] = Some(Piece {
+                color: Color::Red,
+                left_start: true,
+            });
+
+            game.board.tiles[2] = Some(Piece {
+                color: Color::Green,
+                left_start: true,
+            });
+
+            let action = Action { 
+                player: Color::Red,
+                action: ActionKind::Interchange(64, 2),
+                card: Card::Jack,
+            };
+
+            assert!(game.action(Card::Jack, action).is_err());
+        }
+
+        #[test]
+        fn not_own_piece() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Jack, Card::Joker];
+            game.green.cards = vec![Card::Jack, Card::Joker];
+
+            game.board.tiles[1] = Some(Piece {
+                color: Color::Red,
+                left_start: true,
+            });
+
+            game.board.tiles[2] = Some(Piece {
+                color: Color::Green,
+                left_start: true,
+            });
+
+            let action = Action { 
+                player: Color::Red,
+                action: ActionKind::Interchange(2, 1),
+                card: Card::Jack,
+            };
+
+            assert!(game.action(Card::Jack, action).is_err());
+        }
+
+        #[test]
+        fn protected_piece() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Jack, Card::Joker];
+            game.green.cards = vec![Card::Jack, Card::Joker];
+
+            game.board.tiles[0] = Some(Piece {
+                color: Color::Red,
+                left_start: false,
+            });
+
+            game.board.tiles[2] = Some(Piece {
+                color: Color::Green,
+                left_start: true,
+            });
+
+            let action = Action { 
+                player: Color::Red,
+                action: ActionKind::Interchange(0, 2),
+                card: Card::Jack,
+            };
+
+            assert!(game.action(Card::Jack, action).is_err());
+        }
+    }
+ 
+    mod move_tests {
+        use super::*;
+
+        #[test]
+        fn valid_move_forward() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Five, Card::Ten];
+
+            game.board.tiles[0] = Some(Piece {
+                color: Color::Red,
+                left_start: true,
+            });
+
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Move(0, 5),
+                card: Card::Five,
+            };
+
+            assert!(game.action(Card::Five, action).is_ok());
+            assert!(game.board.tiles[0].is_none());
+            assert_eq!(game.board.tiles[5].as_ref().unwrap().color, Color::Red);
+        }
+
+        #[test]
+        fn valid_move_backward() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Four, Card::Ten];
+
+            game.board.tiles[10] = Some(Piece {
+                color: Color::Red,
+                left_start: true,
+            });
+
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Move(10, 6),
+                card: Card::Four,
+            };
+
+            assert!(game.action(Card::Four, action).is_ok());
+            assert!(game.board.tiles[10].is_none());
+            assert_eq!(game.board.tiles[6].as_ref().unwrap().color, Color::Red);
+        }
+
+        #[test]
+        fn valid_move_backward_with_joker() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Joker, Card::Ten];
+
+            game.board.tiles[10] = Some(Piece {
+                color: Color::Red,
+                left_start: true,
+            });
+
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Move(10, 6),
+                card: Card::Joker,
+            };
+
+            assert!(game.action(Card::Joker, action).is_ok());
+            assert!(game.board.tiles[10].is_none());
+            assert_eq!(game.board.tiles[6].as_ref().unwrap().color, Color::Red);
+        }
+
+        #[test]
+        fn invalid_move_with_jack() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Jack, Card::Ten];
+
+            game.board.tiles[0] = Some(Piece {
+                color: Color::Red,
+                left_start: true,
+            });
+
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Move(0, 5),
+                card: Card::Jack,
+            };
+
+            assert!(game.action(Card::Jack, action).is_err());
+            assert_eq!(game.board.tiles[0].as_ref().unwrap().color, Color::Red);
+            assert!(game.board.tiles[5].is_none());
+        }
+
+        #[test]
+        fn invalid_move_past_protected_piece() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Five, Card::Ten];
+
+            game.board.tiles[0] = Some(Piece {
+                color: Color::Red,
+                left_start: true,
+            });
+
+            game.board.tiles[3] = Some(Piece {
+                color: Color::Green,
+                left_start: false,
+            });
+
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Move(0, 5),
+                card: Card::Five,
+            };
+
+            assert!(game.action(Card::Five, action).is_err());
+            assert_eq!(game.board.tiles[0].as_ref().unwrap().color, Color::Red);
+            assert_eq!(game.board.tiles[3].as_ref().unwrap().color, Color::Green);
+            assert!(game.board.tiles[5].is_none());
+        }
+
+        #[test]
+        fn invalid_move_past_house_piece() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Five, Card::Ten];
+
+            game.board.tiles[60] = Some(Piece {
+                color: Color::Red,
+                left_start: true,
+            });
+
+            game.board.tiles[64] = Some(Piece {
+                color: Color::Green,
+                left_start: true,
+            });
+
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Move(60, 65),
+                card: Card::Five,
+            };
+
+            assert!(game.action(Card::Five, action).is_err());
+            assert_eq!(game.board.tiles[60].as_ref().unwrap().color, Color::Red);
+            assert_eq!(game.board.tiles[64].as_ref().unwrap().color, Color::Green);
+            assert!(game.board.tiles[65].is_none());
+        }
+
+        #[test]
+        fn invalid_move_not_own_piece() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Five, Card::Ten];
+
+            game.board.tiles[0] = Some(Piece {
+                color: Color::Green,
+                left_start: true,
+            });
+
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Move(0, 5),
+                card: Card::Five,
+            };
+
+            assert!(game.action(Card::Five, action).is_err());
+            assert_eq!(game.board.tiles[0].as_ref().unwrap().color, Color::Green);
+            assert!(game.board.tiles[5].is_none());
+        }
+
+        #[test]
+        fn invalid_move_not_allowed_by_card() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Three, Card::Ten];
+
+            game.board.tiles[0] = Some(Piece {
+                color: Color::Red,
+                left_start: true,
+            });
+
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Move(0, 5),
+                card: Card::Three,
+            };
+
+            assert!(game.action(Card::Three, action).is_err());
+            assert_eq!(game.board.tiles[0].as_ref().unwrap().color, Color::Red);
+            assert!(game.board.tiles[5].is_none());
+        }
+
+        #[test]
+        fn invalid_move_empty_from_tile() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Five, Card::Ten];
+
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Move(0, 5),
+                card: Card::Five,
+            };
+
+            assert!(game.action(Card::Five, action).is_err());
+            assert!(game.board.tiles[0].is_none());
+            assert!(game.board.tiles[5].is_none());
+        }
+
+        #[test]
+        fn invalid_move_path_cannot_be_calculated() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Five, Card::Ten];
+
+            game.board.tiles[0] = Some(Piece {
+                color: Color::Red,
+                left_start: true,
+            });
+
+            game.board.tiles[1] = Some(Piece {
+                color: Color::Green,
+                left_start: false,
+            });
+
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Move(0, 5),
+                card: Card::Five,
+            };
+
+            assert!(game.action(Card::Five, action).is_err());
+            assert_eq!(game.board.tiles[0].as_ref().unwrap().color, Color::Red);
+            assert_eq!(game.board.tiles[1].as_ref().unwrap().color, Color::Green);
+        }
+
+        #[test]
+        fn beat_opponent_piece() {
+            let mut game = Game::new();
+
+            game.red.cards = vec![Card::Five, Card::Ten];
+
+            game.board.tiles[0] = Some(Piece {
+                color: Color::Red,
+                left_start: true,
+            });
+
+            game.board.tiles[5] = Some(Piece {
+                color: Color::Green,
+                left_start: true,
+            });
+
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Move(0, 5),
+                card: Card::Five,
+            };
+
+            assert!(game.action(Card::Five, action).is_ok());
+            assert!(game.board.tiles[0].is_none());
+            assert_eq!(game.board.tiles[5].as_ref().unwrap().color, Color::Red);
+            assert_eq!(game.player_mut_by_color(Color::Green).pieces_to_place, 5);
+        }
+    }
 }
-
-
