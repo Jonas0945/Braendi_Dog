@@ -18,7 +18,7 @@ pub enum ActionKind {
     Interchange(Point, Point),
     Split(Point, Point),
     Trade,
-    Remove
+    Remove,
 }
 
 impl FromStr for Action {
