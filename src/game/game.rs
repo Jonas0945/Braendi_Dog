@@ -276,14 +276,14 @@ impl DogGame for Game {
                     return Err("Cannot interchange pieces inside player's houses.");
                 }
 
-                let current_player_color = self.current_player_color;
+                let current_player = self.player_by_color(self.current_player_color);
 
-                if from_piece.color != current_player_color {
-                    return Err("First piece needs to be own piece.");
+                if !current_player.can_control_piece(from_piece) {
+                    return Err("Cannot interchange from a piece you don't control")
                 }
 
                 if !from_piece.left_start || !to_piece.left_start {
-                    return Err("Cannot Interchange with protected piece.")
+                    return Err("Cannot interchange with protected piece.")
                 }
 
                 let from_index = from as usize;
@@ -294,7 +294,7 @@ impl DogGame for Game {
                 self.board.tiles[from_index] = Some(to_piece);
                 self.board.tiles[to_index] = Some(from_piece);
 
-                self.player_mut_by_color(current_player_color).remove_card(_card);
+                self.player_mut_by_color(self.current_player_color).remove_card(_card);
                 self.discard.push(_card);
 
                 self.history.push(HistoryEntry {
@@ -444,6 +444,7 @@ impl DogGame for Game {
                     self.split_rest = Some(remaining_steps);
                 }
             },
+
             ActionKind::Remove => {
                 let current_player_color = self.current_player_color;
 
@@ -849,6 +850,98 @@ mod tests {
 
                 assert!(game.action(Card::Jack, action).is_err());
             }
+
+            #[test]
+            fn can_interchange_partner_piece() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+
+                game.red.pieces_in_house = 4;
+
+                game.red.cards = vec![Card::Jack, Card::Joker];
+                game.blue.cards = vec![Card::Jack, Card::Joker];
+
+                game.board.tiles[1] = Some(Piece { color: Color::Blue, left_start: true });
+                game.board.tiles[2] = Some(Piece { color: Color::Red, left_start: true });
+
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Interchange(1, 2),
+                    card: Card::Jack,
+                };
+
+                assert!(game.action(Card::Jack, action).is_ok());
+
+                assert_eq!(game.board.tiles[1].as_ref().unwrap().color, Color::Red);
+                assert_eq!(game.board.tiles[2].as_ref().unwrap().color, Color::Blue);
+
+                assert!(!game.player_mut_by_color(Color::Red).cards.contains(&Card::Jack));
+                assert!(game.discard.contains(&Card::Jack));
+
+                let entry = game.history.last().unwrap();
+                assert_eq!(entry.interchanged_piece_color, Some(Color::Red));
+                assert_eq!(entry.beaten_piece_color, None);
+            }
+
+            #[test]
+            fn cannot_interchange_partner_if_less_than_4_in_house() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+
+                game.red.pieces_in_house = 3;
+
+                game.red.cards = vec![Card::Jack];
+                game.blue.cards = vec![Card::Jack];
+
+                game.board.tiles[1] = Some(Piece { color: Color::Blue, left_start: true });
+                game.board.tiles[2] = Some(Piece { color: Color::Red, left_start: true });
+
+                let action1 = Action {
+                    player: Color::Red,
+                    action: ActionKind::Interchange(1, 2),
+                    card: Card::Jack,
+                };
+
+                let action2 = Action {
+                    player: Color::Red,
+                    action: ActionKind::Interchange(2, 1),
+                    card: Card::Jack,
+                };
+
+                assert!(game.action(Card::Jack, action1).is_err());
+                assert!(game.action(Card::Jack, action2).is_ok());
+            }
+
+            #[test]
+            fn partner_piece_protected_cannot_interchange() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+
+                game.red.pieces_in_house = 4;
+
+                game.red.cards = vec![Card::Jack];
+                game.blue.cards = vec![Card::Jack];
+
+                game.board.tiles[1] = Some(Piece { color: Color::Blue, left_start: false });
+                game.board.tiles[2] = Some(Piece { color: Color::Red, left_start: true });
+                game.board.tiles[3] = Some(Piece { color: Color::Blue, left_start: true });
+
+                let action1 = Action {
+                    player: Color::Red,
+                    action: ActionKind::Interchange(1, 2),
+                    card: Card::Jack,
+                };
+
+                let action2 = Action {
+                    player: Color::Red,
+                    action: ActionKind::Interchange(3, 2),
+                    card: Card::Jack,
+                };
+
+                assert!(game.action(Card::Jack, action1).is_err());
+                assert!(game.action(Card::Jack, action2).is_ok());
+            }
+
         }
     
         mod move_tests {
