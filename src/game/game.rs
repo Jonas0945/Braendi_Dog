@@ -1649,5 +1649,50 @@ mod tests {
                 assert!(game.action(Card::Ten, action2).is_err());
             }
         }
+    
+        mod remove_tests {
+            use super::*;
+
+            #[test]
+            fn remove_card_success() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+
+                game.red.cards = vec![Card::Two, Card::Five];
+
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Remove,
+                    card: Card::Two,
+                };
+
+                assert!(game.action(Card::Two, action).is_ok());
+
+                assert!(!game.red.cards.contains(&Card::Two));
+
+                assert!(game.red.cards.contains(&Card::Five));
+            
+                assert!(game.discard.contains(&Card::Two));
+
+                assert_eq!(game.current_player_color, Color::Green);
+            }
+
+            #[test]
+            fn remove_card_not_in_hand() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+
+                game.red.cards = vec![Card::Seven];
+
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Remove,
+                    card: Card::Two,
+                };
+
+                assert!(game.action(Card::Two, action).is_err());
+            }      
+        }
+    
     }    
 }
