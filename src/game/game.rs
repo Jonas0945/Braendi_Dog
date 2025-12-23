@@ -350,11 +350,22 @@ impl DogGame for Game {
                 }
 
                 let current_player_color = self.current_player_color;
+                let teammate_color = current_player_color.teammate();
 
-                let distance = self.board.distance_between(from, to, current_player_color)
+                let moving_piece = match self.board.check_tile(from) {
+                    Some(p) => p,
+                    None => return Err("Invalid move: no piece found."),
+                };
+
+                if moving_piece.color != current_player_color
+                    && moving_piece.color != teammate_color {
+                    return Err("Cannot split-move opponent's piece.");
+                }
+
+                let distance = self.board.distance_between(from, to, moving_piece.color)
                     .ok_or("Invalid action.")?;
 
-                if distance > 7 || distance == 0 {
+                if distance == 0 || distance > 7 {
                     return Err("Split move must have 1..7 steps.");
                 }
 
@@ -364,19 +375,10 @@ impl DogGame for Game {
                     return Err("Cannot move more steps than remaining split.");
                 }
 
-                let moving_piece = match self.board.check_tile(from) {
-                    Some(p) => p,
-                    None => return Err("Invalid move: no piece found."),
-                };
-
-                if moving_piece.color != current_player_color {
-                    return Err("You can only move your own piece.");
-                }
-
                 // Calculate path and check for blocking pieces
-                let path = match self.board.passed_tiles(from, to, self.current_player_color, false) {
+                let path = match self.board.passed_tiles(from, to, moving_piece.color, false) {
                     Some(p) => p,
-                    None => return Err("Invalid move: path cannot be calculated.")
+                    None => return Err("Invalid split move: path cannot be calculated.")
                 };
 
                 for &tile in &path {
@@ -398,9 +400,9 @@ impl DogGame for Game {
 
 
                     // Create "mini"- history if piece is beaten
-                    if let Some(opponent_piece) = self.board.tiles[tile as usize].take() {
+                    if let Some(beaten_piece) = self.board.tiles[tile as usize].take() {
                         
-                        self.player_mut_by_color(opponent_piece.color).pieces_to_place += 1;
+                        self.player_mut_by_color(beaten_piece.color).pieces_to_place += 1;
 
                         // Mini history
                         self.history.push( HistoryEntry { 
@@ -409,7 +411,7 @@ impl DogGame for Game {
                                 card: _card, 
                                 action: ActionKind::Split(current_position, tile) 
                             }, 
-                            beaten_piece_color: Some(opponent_piece.color), 
+                            beaten_piece_color: Some(beaten_piece.color), 
                             interchanged_piece_color: None, 
                         });
 
@@ -420,6 +422,10 @@ impl DogGame for Game {
                 // Piece placement and history update
                 let moving_piece = self.board.tiles[from as usize].take().unwrap();
                 self.board.tiles[to as usize] = Some(moving_piece);
+
+                if from < 64 && to >= 64 {
+                    self.player_mut_by_color(moving_piece.color).pieces_in_house += 1;
+                }
 
                 if current_position != to {
 
@@ -1387,8 +1393,6 @@ mod tests {
             }
         }
 
-
-
         mod split_tests {
             use super::*;
 
@@ -1399,21 +1403,42 @@ mod tests {
 
                 game.red.cards = vec![Card::Seven, Card::Ten];
 
-                game.board.tiles[0] = Some(Piece {
+                game.board.tiles[63] = Some(Piece {
                     color: Color::Red,
                     left_start: true,
                 });
 
-                let action = Action {
+                game.board.tiles[4] = Some(Piece {
+                    color: Color::Blue,
+                    left_start: false,
+                });
+
+                let action1 = Action {
                     player: Color::Red,
-                    action: ActionKind::Split(0, 5),
+                    action: ActionKind::Split(63, 67),
                     card: Card::Seven,
                 };
 
-                assert!(game.action(Card::Seven, action).is_ok());
-                assert!(game.board.tiles[0].is_none());
-                assert_eq!(game.board.tiles[5].as_ref().unwrap().color, Color::Red);
+                let action2 = Action {
+                    player: Color::Red,
+                    action: ActionKind::Split(4, 6),
+                    card: Card::Seven
+                };
+
+                assert!(game.action(Card::Seven, action1).is_ok());
+                assert!(game.board.tiles[63].is_none());
+                assert_eq!(game.board.tiles[67].as_ref().unwrap().color, Color::Red);
+                assert_eq!(game.red.pieces_in_house, 1);
                 assert_eq!(game.split_rest, Some(2));
+
+                let _ = game.action(Card::Seven, action1);
+
+                assert!(game.action(Card::Seven, action2).is_ok());
+                assert!(game.board.tiles[4].is_none());
+                assert_eq!(game.board.tiles[6].as_ref().unwrap().color, Color::Blue);
+                assert_eq!(game.red.pieces_in_house, 1);
+                assert_eq!(game.split_rest, None);
+                assert_eq!(game.current_player_color, Color::Green);
             }
 
             #[test]
@@ -1709,6 +1734,94 @@ mod tests {
                 assert_eq!(second_entry.action.action, ActionKind::Split(4, 7));
             }
             
+            #[test]
+            fn split_can_move_partner_piece_without_pieces_in_house() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+
+                game.red.cards = vec![Card::Seven];
+                game.red.pieces_in_house = 0;
+
+                game.board.tiles[0] = Some(Piece {
+                    color: Color::Blue,
+                    left_start: true,
+                });
+
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Split(0, 3),
+                    card: Card::Seven,
+                };
+
+                assert!(game.action(Card::Seven, action).is_ok());
+                assert!(game.board.tiles[0].is_none());
+                assert_eq!(game.board.tiles[3].as_ref().unwrap().color, Color::Blue);
+            }
+
+            #[test]
+            fn split_can_beat_partner_piece() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+
+                game.red.cards = vec![Card::Seven];
+                game.blue.pieces_to_place = 3;
+
+                game.board.tiles[0] = Some(Piece { color: Color::Red, left_start: true });
+                game.board.tiles[3] = Some(Piece { color: Color::Blue, left_start: true });
+
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Split(0, 5),
+                    card: Card::Seven,
+                };
+
+                assert!(game.action(Card::Seven, action).is_ok());
+                assert_eq!(game.blue.pieces_to_place, 4);
+            }
+
+            #[test]
+            fn split_enter_house_only_counts_once() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+
+                game.red.cards = vec![Card::Seven];
+
+                game.board.tiles[63] = Some(Piece {
+                    color: Color::Red,
+                    left_start: true,
+                });
+
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Split(63, 66),
+                    card: Card::Seven,
+                };
+
+                assert!(game.action(Card::Seven, action).is_ok());
+                assert_eq!(game.red.pieces_in_house, 1);
+            }
+
+            #[test]
+            fn split_cannot_enter_wrong_house() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+
+                game.red.cards = vec![Card::Seven];
+
+                game.board.tiles[15] = Some(Piece {
+                    color: Color::Red,
+                    left_start: true,
+                });
+
+                
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Split(15, 68),
+                    card: Card::Seven,
+                };
+
+                assert!(game.action(Card::Seven, action).is_err());
+            }
         }
 
         mod trade_tests {
