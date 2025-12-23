@@ -142,17 +142,26 @@ impl DogGame for Game {
                     _ => return Err("Cannot place piece with this card."),
                 }
                 
+                
+                // Check if player can interact with teammate pieces
                 let current_player_color = self.current_player_color;
-                let start = Board::start_field(current_player_color) as usize;
 
-                if self.current_player().pieces_to_place == 0 {
+                let place_color = if self.player_by_color(current_player_color).pieces_in_house == 4 {
+                    current_player_color.teammate()
+                } else {
+                    current_player_color
+                };
+
+                let start = Board::start_field(place_color) as usize;
+
+                if self.player_by_color(place_color).pieces_to_place == 0 {
                     return Err("Cannot place piece: no pieces left to place.");
                 }
 
                 let mut beaten_piece_color = None;
 
                 if let Some(piece) = self.board.tiles[start].take() {
-                    if piece.color == current_player_color && !piece.left_start {
+                    if piece.color == place_color && !piece.left_start {
                         self.board.tiles[start] = Some(piece);
                         return Err("Cannot place piece: your protected piece is blocking.")
                     }
@@ -160,7 +169,7 @@ impl DogGame for Game {
                     self.player_mut_by_color(piece.color).pieces_to_place += 1;
                 }
 
-                self.board.tiles[start] = Some (Piece::new(current_player_color));
+                self.board.tiles[start] = Some (Piece::new(place_color));
 
                 self.player_mut_by_color(current_player_color).remove_card(_card);
                 self.discard.push(_card);
@@ -171,7 +180,7 @@ impl DogGame for Game {
                     interchanged_piece_color: None,
                 });
 
-                self.player_mut_by_color(current_player_color).pieces_to_place -= 1;
+                self.player_mut_by_color(place_color).pieces_to_place -= 1;
                 self.current_player_color = self.current_player_color.next();
             }
 
@@ -639,6 +648,30 @@ mod tests {
 
                 assert!(game.action(card, action).is_ok());
                 assert_eq!(game.board.tiles[start].as_ref().unwrap().color, Color::Red);
+            }
+
+            #[test]
+            fn place_partner_piece() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+
+                game.red.pieces_in_house = 4;
+                game.red.cards = vec![Card::Ace];
+                game.blue.pieces_to_place = 4;
+
+                let start = Board::start_field(Color::Blue) as usize;
+                let card = Card::Ace;
+
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Place,
+                    card,
+                };
+
+                assert!(game.action(card, action).is_ok());
+                assert_eq!(game.board.tiles[start].as_ref().unwrap().color, Color::Blue);
+                assert_eq!(game.player_mut_by_color(Color::Blue).pieces_to_place, 3);
+                assert!(!game.player_mut_by_color(Color::Red).cards.contains(&card));
             }
         }
         
