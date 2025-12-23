@@ -190,21 +190,22 @@ impl DogGame for Game {
                     Card::Seven => return Err("Cannot move with Seven (-> Split)"),
                     _ => {},
                 }
-
-                let current_player_color = self.current_player_color;
                 
                 let moving_piece = match self.board.check_tile(from) {
                     Some(p) => p,
                     None => return Err("Invalid move: no piece found."),
                 };
 
-                if moving_piece.color != current_player_color {
-                    return Err("You can only move your own piece.");
+                let current_player_color = self.current_player_color;
+                let current_player = self.player_by_color(current_player_color);
+
+                if !current_player.can_control_piece(moving_piece) {
+                    return Err("You cannot move this piece.");
                 }
 
                 // Calculate distances and check if card allows the move
-                let forward_distance = self.board.distance_between(from, to, current_player_color);
-                let backward_distance = self.board.distance_between(to, from, current_player_color);
+                let forward_distance = self.board.distance_between(from, to, moving_piece.color);
+                let backward_distance = self.board.distance_between(to, from, moving_piece.color);
 
                 if !self.can_card_move(_card, forward_distance, backward_distance) {
                     return Err("Move not allowed with this card")
@@ -214,7 +215,7 @@ impl DogGame for Game {
                 let is_backward = matches!(_card, Card::Four | Card::Joker)
                     && backward_distance == Some(4);
 
-                let path = match self.board.passed_tiles(from, to, self.current_player_color, is_backward) {
+                let path = match self.board.passed_tiles(from, to, moving_piece.color, is_backward) {
                     Some(p) => p,
                     None => return Err("Invalid move: path cannot be calculated.")
                 };
@@ -242,6 +243,11 @@ impl DogGame for Game {
 
                 // Piece placement and history update
                 self.board.tiles[to as usize] = Some(moving_piece);
+
+                // Piece moves into house
+                if from < 64 && to >= 64 { 
+                    self.player_mut_by_color(moving_piece.color).pieces_in_house += 1;
+                }
 
                 self.player_mut_by_color(current_player_color).remove_card(_card);
                 self.discard.push(_card);
@@ -461,7 +467,7 @@ impl DogGame for Game {
                 });
 
                 self.current_player_color = self.current_player_color.next();
-            }
+            },
         }
     
 
@@ -550,7 +556,10 @@ impl DogGame for Game {
     }
     
     fn is_winner(&self) -> bool {
-        todo!()
+        let current_player = self.player_by_color(self.current_player_color);
+        let teammate = self.player_by_color(self.current_player_color.teammate());
+
+        current_player.pieces_in_house == 4 && teammate.pieces_in_house == 4
     }
 }
 
@@ -971,6 +980,55 @@ mod tests {
             }
 
             #[test]
+            fn valid_move_into_house() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+
+                game.red.cards = vec![Card::Five, Card::Ten];
+
+                game.board.tiles[60] = Some(Piece {
+                    color: Color::Red,
+                    left_start: true,
+                });
+
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Move(60, 64),
+                    card: Card::Five,
+                };
+
+                assert!(game.action(Card::Five, action).is_ok());
+                assert!(game.board.tiles[60].is_none());
+                assert_eq!(game.board.tiles[64].as_ref().unwrap().color, Color::Red);
+                assert_eq!(game.red.pieces_in_house, 1);
+            }
+
+            #[test]
+            fn valid_move_in_house() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+
+                game.red.cards = vec![Card::Ace, Card::Ten];
+                game.red.pieces_in_house = 1;
+
+                game.board.tiles[64] = Some(Piece {
+                    color: Color::Red,
+                    left_start: true,
+                });
+
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Move(64, 65),
+                    card: Card::Ace,
+                };
+
+                assert!(game.action(Card::Ace, action).is_ok());
+                assert!(game.board.tiles[64].is_none());
+                assert_eq!(game.board.tiles[65].as_ref().unwrap().color, Color::Red);
+                assert_eq!(game.red.pieces_in_house, 1);
+            }
+
+            #[test]
             fn valid_move_backward() {
                 let mut game = Game::new();
                 game.swapping_phase = false;
@@ -1217,7 +1275,119 @@ mod tests {
                 assert_eq!(game.board.tiles[5].as_ref().unwrap().color, Color::Red);
                 assert_eq!(game.player_mut_by_color(Color::Green).pieces_to_place, 5);
             }
+
+            #[test]
+            fn move_partner_piece_forward() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+
+                game.red.pieces_in_house = 4;
+                game.red.cards = vec![Card::Five];
+                game.blue.cards = vec![Card::Five];
+
+                game.board.tiles[0] = Some(Piece {
+                    color: Color::Blue,
+                    left_start: true,
+                });
+
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Move(0, 5),
+                    card: Card::Five,
+                };
+
+                assert!(game.action(Card::Five, action).is_ok());
+                assert!(game.board.tiles[0].is_none());
+                assert_eq!(game.board.tiles[5].as_ref().unwrap().color, Color::Blue);
+                assert!(!game.player_mut_by_color(Color::Red).cards.contains(&Card::Five));
+            }
+
+            #[test]
+            fn move_partner_piece_into_house() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+                game.current_player_color = Color::Blue;
+
+                game.blue.pieces_in_house = 4;
+                game.red.cards = vec![Card::Two];
+                game.blue.cards = vec![Card::Two];
+
+                // Partner-Figur kurz vor Haus
+                game.board.tiles[63] = Some(Piece {
+                    color: Color::Red,
+                    left_start: true,
+                });
+
+                let action = Action {
+                    player: Color::Blue,
+                    action: ActionKind::Move(63, 64),
+                    card: Card::Two,
+                };
+
+                assert!(game.action(Card::Two, action).is_ok());
+                assert!(game.board.tiles[63].is_none());
+                assert_eq!(game.board.tiles[64].as_ref().unwrap().color, Color::Red);
+                assert_eq!(game.player_by_color(Color::Red).pieces_in_house, 1);
+            }
+
+            #[test]
+            fn cannot_move_partner_piece_if_not_in_house() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+
+                game.red.pieces_in_house = 3;
+                game.red.cards = vec![Card::Five];
+                game.blue.cards = vec![Card::Five];
+
+                game.board.tiles[0] = Some(Piece {
+                    color: Color::Blue,
+                    left_start: true,
+                });
+
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Move(0, 5),
+                    card: Card::Five,
+                };
+
+                assert!(game.action(Card::Five, action).is_err());
+                assert_eq!(game.board.tiles[0].as_ref().unwrap().color, Color::Blue);
+                assert!(game.board.tiles[5].is_none());
+            }
+
+            #[test]
+            fn cannot_move_partner_piece_past_protected_piece() {
+                let mut game = Game::new();
+                game.swapping_phase = false;
+
+                game.red.pieces_in_house = 4;
+                game.red.cards = vec![Card::Five];
+                game.blue.cards = vec![Card::Five];
+
+                game.board.tiles[0] = Some(Piece {
+                    color: Color::Blue,
+                    left_start: true,
+                });
+
+                game.board.tiles[3] = Some(Piece {
+                    color: Color::Red,
+                    left_start: false,
+                });
+
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Move(0, 5),
+                    card: Card::Five,
+                };
+
+                assert!(game.action(Card::Five, action).is_err());
+                assert_eq!(game.board.tiles[0].as_ref().unwrap().color, Color::Blue);
+                assert_eq!(game.board.tiles[3].as_ref().unwrap().color, Color::Red);
+                assert!(game.board.tiles[5].is_none());
+            }
         }
+
+
 
         mod split_tests {
             use super::*;
