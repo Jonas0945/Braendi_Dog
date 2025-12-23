@@ -18,6 +18,7 @@ pub enum ActionKind {
     Interchange(Point, Point),
     Split(Point, Point),
     Trade,
+    Remove
 }
 
 impl FromStr for Action {
@@ -28,6 +29,7 @@ impl FromStr for Action {
     /// "Y 4 M 16 20" - Yellow moves from 16 to 20 with 4
     /// "B 11 I 40 45" - Blue interchangees between 40 and 45 with Jack (= 11)
     /// "Y 0 T" - Yellow wants so trade his/her Joker with Green
+    /// "R 7 R" - Red removes 7 from his hand
     
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split_whitespace().collect();
@@ -108,6 +110,14 @@ impl FromStr for Action {
 
                 ActionKind::Split(from, to)
             }
+
+            "R" => {
+                if parts.len() != 3 {
+                    return Err("Invalid remove format");
+                }
+
+                ActionKind::Remove
+            }
             _ => return Err("Invalid action type"),
         };
 
@@ -147,6 +157,7 @@ impl Display for Action {
             ActionKind::Interchange(from, to) => format!("I {from} {to}"),
             ActionKind::Trade => format!("T"),
             ActionKind::Split(from, to) => format!("S {from} {to}"),
+            ActionKind::Remove => format!("R"),
         };
 
         write!(f, "{player_str} {card_str} {action_str}")

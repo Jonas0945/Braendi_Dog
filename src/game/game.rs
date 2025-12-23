@@ -48,45 +48,6 @@ impl Game {
         }
     }
 
-    pub fn can_player_act(&self, color: Color) -> bool {
-        let player = self.player_by_color(color);
-
-        // (Trivial) Case 0: swapping phase
-        if self.swapping_phase {
-            return player.cards.len() > 0;
-        }
-
-        if player.pieces_to_place == 4 {
-            return self.can_player_place(color);
-        }
-
-        false
-    }
-
-    fn can_player_place(&self, color: Color) -> bool {
-        let player = self.player_by_color(color);
-
-        if player.pieces_to_place == 0 {
-            return false;
-        }
-
-        let has_place_card = player.cards.iter().any(|&card| {
-            matches!(card, Card::Ace | Card::King | Card::Joker)
-        });
-
-        if !has_place_card {
-            return false;
-        }
-
-        let start = self.board.house_entry(color);
-
-        match self.board.tiles[start as usize] {
-            None => true,
-            Some(piece) => piece.left_start,
-        }
-
-    }
-
     pub fn can_card_move(&self, _card: Card, forward: Option<u8>, backward: Option<u8>) -> bool {
         let distances = match _card.possible_distances() {
             Some(d) => d,
@@ -474,6 +435,23 @@ impl DogGame for Game {
                     self.split_rest = Some(remaining_steps);
                 }
             },
+            ActionKind::Remove => {
+                let current_player_color = self.current_player_color;
+
+                let card_index = self.player_mut_by_color(current_player_color).cards.iter().position(|&c| c == _card)
+                    .ok_or("Cannot remove: card not found in player's hand.")?;
+
+                self.player_mut_by_color(current_player_color).cards.remove(card_index);
+                self.discard.push(_card);
+
+                self.history.push(HistoryEntry {
+                    action: _action,
+                    beaten_piece_color: None,
+                    interchanged_piece_color: None,
+                });
+
+                self.current_player_color = self.current_player_color.next();
+            }
         }
     
 
@@ -531,7 +509,8 @@ impl DogGame for Game {
             }
             ActionKind::Move(_, _) => todo!(),
             ActionKind::Trade => todo!(),
-            ActionKind::Split(_, _) => todo!()
+            ActionKind::Split(_, _) => todo!(),
+            ActionKind::Remove => todo!(),
         }
 
         Ok(())
@@ -568,96 +547,6 @@ impl DogGame for Game {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    mod can_player_tests {
-        use super::*;
-
-        #[test]
-        fn player_cannot_act_if_only_place_is_impossible() {
-            let mut game = Game::new();
-            game.swapping_phase = false;
-
-            game.red.cards = vec![Card::Seven];
-
-            assert!(!game.can_player_act(Color::Red));
-        }
-
-        mod can_player_place_tests {
-            use super::*;
-
-           #[test]
-            fn can_player_place_no_place_card() {
-                let mut game = Game::new();
-                game.swapping_phase = false;
-
-                game.red.cards = vec![Card::Seven, Card::Nine];
-
-                assert!(!game.can_player_place(Color::Red));
-            }
-
-            #[test]
-            fn can_player_place_with_ace() {
-                let mut game = Game::new();
-                game.swapping_phase = false;
-
-                game.red.cards = vec![Card::Ace];
-
-                assert!(game.can_player_place(Color::Red));
-            }
-
-            #[test]
-            fn can_player_place_start_occupied_by_opponent() {
-                let mut game = Game::new();
-                game.swapping_phase = false;
-
-                game.red.cards = vec![Card::Ace];
-
-                game.board.tiles[0] = Some(Piece { 
-                    color: Color::Green, 
-                    left_start: true 
-                });
-
-                assert!(game.can_player_place(Color::Red));
-            }
-
-            #[test]
-            fn can_player_place_start_occupied_by_own_piece() {
-                let mut game = Game::new();
-                game.swapping_phase = false;
-
-                game.red.cards = vec![Card::Ace];
-
-                game.board.tiles[0] = Some(Piece { 
-                    color: Color::Red, 
-                    left_start: false 
-                });
-
-                assert!(!game.can_player_place(Color::Red));
-            }
-
-            #[test]
-            fn can_player_place_no_pieces_to_place() {
-                let mut game = Game::new();
-                game.swapping_phase = false;
-
-                game.red.cards = vec![Card::Ace];
-                game.red.pieces_to_place = 0;
-
-                assert!(!game.can_player_place(Color::Red));
-            }
-
-            #[test]
-            fn can_player_place_multiple_cards_one_valid() {
-                let mut game = Game::new();
-                game.swapping_phase = false;
-
-                game.red.cards = vec![Card::Seven, Card::Jack, Card::Ace];
-
-                assert!(game.can_player_place(Color::Red));
-            }
-
-        }
-    }
 
     mod action_tests {
         use super::*;
