@@ -78,9 +78,9 @@ impl Board {
     pub fn start_field(color: Color) -> Point {
         match color {
             Color::Red => 0,
-            Color::Green => 15,
-            Color::Blue => 31, 
-            Color::Yellow => 47,
+            Color::Green => 16,
+            Color::Blue => 32, 
+            Color::Yellow => 48,
         }
     }
 
