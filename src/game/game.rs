@@ -78,8 +78,11 @@ pub trait DogGame {
     // Undoes the last action
     fn undo(&mut self) -> Result<(), &'static str>;
 
-    // Returns the current state of the board
-    fn board(&self) -> &[Option<Piece>; 80];
+    // // Undoes the last complete turn, including all actions that belong to it
+    fn undo_turn(&mut self) -> Result<(), &'static str>;
+
+    // Undoes multiple turns in sequence
+    fn undo_sequence(&mut self, turns: usize) -> Result<(), &'static str>;
 
     // Gives players new cards after previous round is finished
     fn new_round(&mut self);
@@ -561,7 +564,7 @@ impl DogGame for Game {
 
         Ok(())
     }
-    
+
     fn undo(&mut self) -> Result<(), &'static str> {
         let entry= self.history.pop().ok_or("No action to undo")?;
         let entry_player_color = entry.action.player;
@@ -703,10 +706,51 @@ impl DogGame for Game {
         Ok(())
     }
     
-    fn board(&self) -> &[Option<Piece>; 80] {
-        &self.board.tiles
+    fn undo_turn(&mut self) -> Result<(), &'static str> {
+        if self.history.is_empty() {
+            return Err("Nothing to undo");
+        }
+
+        // Loop through multi-step split or whole trading phase
+        loop {
+            let (action_kind, split_rest_before, trade_buffer_before) = {
+                let entry = self.history.last().unwrap();
+                (
+                    entry.action.action.clone(),
+                    entry.split_rest_before,
+                    entry.trade_buffer_before.clone(),
+                )
+            };
+
+            self.undo()?;
+
+            match action_kind {
+                ActionKind::Split(_, _) => {
+                    if split_rest_before.is_none() {
+                        break;
+                    }
+                },
+            
+                ActionKind::Trade => {
+                    if trade_buffer_before.is_empty() {
+                        break
+                    }
+                },
+
+                _ => break,
+            }
+        }
+
+        Ok(())
     }
-    
+
+    fn undo_sequence(&mut self, turns: usize) -> Result<(), &'static str> {
+        for _ in 0..turns {
+            self.undo_turn()?;
+        }
+        Ok(())
+    }
+        
     fn new_round(&mut self) {
         let current_round = (self.round % 4) as usize;
         let cards_to_deal = CARDS_PER_ROUND[current_round];
@@ -3119,6 +3163,215 @@ mod tests {
                 assert_eq!(game.red.cards.len(), 2);
                 assert!(game.red.cards.contains(&Card::Five));               
             }
+        }
+    }
+
+    mod undo_turn_tests {
+        use super::*;
+
+        #[test]
+        fn undo_turn_single_action() {
+            let mut game = Game::new();
+            game.trading_phase = false;
+
+            game.red.cards = vec![Card::Ace];
+
+            let action = Action {
+                player: Color::Red,
+                action: ActionKind::Place,
+                card: Card::Ace,
+            };
+
+            assert!(game.action(Card::Ace, action).is_ok());
+
+            // Sanity check
+            let start = Board::start_field(Color::Red) as usize;
+            assert!(game.board.tiles[start].is_some());
+            assert_eq!(game.current_player_color, Color::Green);
+
+            // Undo full turn
+            assert!(game.undo_turn().is_ok());
+
+            assert!(game.board.tiles[start].is_none());
+            assert!(game.red.cards.contains(&Card::Ace));
+            assert_eq!(game.current_player_color, Color::Red);
+        }
+
+        #[test]
+        fn undo_turn_split() {
+            let mut game = Game::new();
+            game.trading_phase = false;
+
+            game.red.cards = vec![Card::Seven];
+
+            game.board.tiles[0] = Some(Piece {
+                color: Color::Red,
+                left_start: false,
+            });
+
+            game.board.tiles[3] = Some(Piece { 
+                color: Color::Green, 
+                left_start: true 
+            });
+
+            let action1 = Action {
+                player: Color::Red,
+                action: ActionKind::Split(0, 5),
+                card: Card::Seven,
+            };
+
+            let action2 = Action {
+                player: Color::Red,
+                action: ActionKind::Split(5, 7),
+                card: Card::Seven,
+            };
+
+            // Simulate turns
+            assert!(game.action(Card::Seven, action1).is_ok());
+            assert_eq!(game.split_rest, Some(2));
+            assert!(game.action(Card::Seven, action2).is_ok());
+            assert_eq!(game.split_rest, None);
+            assert_eq!(game.current_player_color, Color::Green);
+            
+            assert!(game.undo_turn().is_ok());
+            assert_eq!(game.board.tiles[0].as_ref().unwrap().color, Color::Red);
+            assert_eq!(game.board.tiles[3].as_ref().unwrap().color, Color::Green);
+            assert!(game.board.tiles[7].is_none());
+            assert_eq!(game.current_player_color, Color::Red);
+            assert_eq!(game.split_rest, None);
+        }
+
+        #[test]
+        fn undo_turn_full_trade() {
+            let mut game = Game::new();
+            game.trading_phase = true;
+
+            game.red.cards = vec![Card::Ace];
+            game.green.cards = vec![Card::Two];
+            game.blue.cards = vec![Card::Three];
+            game.yellow.cards = vec![Card::Four];
+
+            let action1 = Action {
+                player: Color::Red,
+                action: ActionKind::Trade,
+                card: Card::Ace,
+            };
+
+            let action2 = Action {
+                player: Color::Green,
+                action: ActionKind::Trade,
+                card: Card::Two,
+            };
+
+            let action3 = Action {
+                player: Color::Blue,
+                action: ActionKind::Trade,
+                card: Card::Three,
+            };
+
+            let action4 = Action {
+                player: Color::Yellow,
+                action: ActionKind::Trade,
+                card: Card::Four,
+            };
+
+            assert!(game.action(Card::Ace, action1).is_ok());
+            assert!(game.action(Card::Two, action2).is_ok());
+            assert!(game.action(Card::Three, action3).is_ok());
+            assert!(game.action(Card::Four, action4).is_ok());
+            assert!(!game.trading_phase);
+
+            assert!(game.undo_turn().is_ok());
+            assert!(game.trading_phase);
+            assert_eq!(game.current_player_color, Color::Red);
+            assert!(game.trade_buffer.is_empty());
+            
+        }
+    }
+
+    mod undo_sequence_tests {
+        use super::*;
+
+        #[test]
+        fn undo_sequence_multiple_turns() {
+            let mut game = Game::new();
+            game.trading_phase = false;
+
+            game.red.cards = vec![Card::Ace];
+            game.green.cards = vec![Card::Ace];
+
+            let action_red = Action {
+                player: Color::Red,
+                action: ActionKind::Place,
+                card: Card::Ace,
+            };
+
+            let action_green = Action {
+                player: Color::Green,
+                action: ActionKind::Place,
+                card: Card::Ace,
+            };
+
+            assert!(game.action(Card::Ace, action_red).is_ok());
+            assert!(game.action(Card::Ace, action_green).is_ok());
+
+            // Undo both turns
+            assert!(game.undo_sequence(2).is_ok());
+
+            let red_start = Board::start_field(Color::Red) as usize;
+            let green_start = Board::start_field(Color::Green) as usize;
+
+            assert!(game.board.tiles[red_start].is_none());
+            assert!(game.board.tiles[green_start].is_none());
+
+            assert!(game.red.cards.contains(&Card::Ace));
+            assert!(game.green.cards.contains(&Card::Ace));
+            assert_eq!(game.current_player_color, Color::Red);
+        }
+
+        #[test]
+        fn undo_sequence_trade_and_place() {
+            let mut game = Game::new();
+            game.trading_phase = true;
+
+            game.red.cards = vec![Card::Five];
+            game.green.cards = vec![Card::Two];
+            game.blue.cards = vec![Card::Ace];
+            game.yellow.cards = vec![Card::Nine];
+
+            // Full trade
+            for (color, card) in [
+                (Color::Red, Card::Five),
+                (Color::Green, Card::Two),
+                (Color::Blue, Card::Ace),
+                (Color::Yellow, Card::Nine),
+            ] {
+                let action = Action {
+                    player: color,
+                    action: ActionKind::Trade,
+                    card,
+                };
+                assert!(game.action(card, action).is_ok());
+            }
+
+            let place_action = Action {
+                player: Color::Red,
+                card: Card::Ace,
+                action: ActionKind::Place,
+            };
+
+            assert!(game.action(Card::Ace, place_action).is_ok());
+
+            // Undo entire trade
+            assert!(game.undo_sequence(2).is_ok());
+
+            assert!(game.trading_phase);
+            assert_eq!(game.trade_buffer.len(), 0);
+
+            assert!(game.red.cards.contains(&Card::Five));
+            assert!(game.green.cards.contains(&Card::Two));
+            assert!(game.blue.cards.contains(&Card::Ace));
+            assert!(game.yellow.cards.contains(&Card::Nine));
         }
     }
 }
