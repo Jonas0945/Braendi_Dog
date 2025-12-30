@@ -65,6 +65,13 @@ impl Game {
         let card = action.card;
         self.action(card, action)
     }
+
+    fn all_players_out_of_cards(&self) -> bool {
+        self.red.cards.is_empty()
+            && self.green.cards.is_empty()
+            && self.blue.cards.is_empty()
+            && self.yellow.cards.is_empty()
+    }
 }
 
 
@@ -82,7 +89,7 @@ pub trait DogGame {
     fn action(&mut self, card: Card, action: Action) -> Result<(), &'static str>;
 
     // Undoes the last action
-    fn undo(&mut self) -> Result<(), &'static str>;
+    fn undo_action(&mut self) -> Result<(), &'static str>;
 
     // // Undoes the last complete turn, including all actions that belong to it
     fn undo_turn(&mut self) -> Result<(), &'static str>;
@@ -196,6 +203,8 @@ impl DogGame for Game {
                     split_rest_before: None,
                     trade_buffer_before: Vec::new(),
                     left_start_before: false,
+
+                    cards_dealt: Vec::new(),
                 });
 
                 self.player_mut_by_color(place_color).pieces_to_place -= 1;
@@ -285,6 +294,8 @@ impl DogGame for Game {
                     split_rest_before: None,
                     trade_buffer_before: Vec::new(),
                     left_start_before,
+
+                    cards_dealt: Vec::new(),
                 });
 
                 self.current_player_color = self.current_player_color.next();        
@@ -342,6 +353,8 @@ impl DogGame for Game {
                     split_rest_before: None,
                     trade_buffer_before: Vec::new(),
                     left_start_before: true,
+
+                    cards_dealt: Vec::new(),
                 });
                 
                 self.current_player_color = self.current_player_color.next();
@@ -386,6 +399,8 @@ impl DogGame for Game {
                     split_rest_before: None,
                     trade_buffer_before,
                     left_start_before: false,
+
+                    cards_dealt: Vec::new(),
                 });
 
                 self.current_player_color = current_player_color.next();           
@@ -471,7 +486,9 @@ impl DogGame for Game {
 
                             split_rest_before,
                             trade_buffer_before: Vec::new(),
-                            left_start_before
+                            left_start_before,
+
+                            cards_dealt: Vec::new(),
                         });
 
                         // Update step-mechanism
@@ -518,6 +535,8 @@ impl DogGame for Game {
                         split_rest_before,
                         trade_buffer_before: Vec::new(),
                         left_start_before,
+
+                        cards_dealt: Vec::new(),
                     });
 
                     remaining_steps -= distance;
@@ -557,22 +576,31 @@ impl DogGame for Game {
                     split_rest_before: None,
                     trade_buffer_before: Vec::new(),
                     left_start_before: false,
+
+                    cards_dealt: Vec::new(),
                 });
 
                 self.current_player_color = self.current_player_color.next();
             },
         }
     
-
-        if self.discard.len() == (CARDS_PER_ROUND[(self.round % 4) as usize] * 4) as usize {
+        if self.all_players_out_of_cards() {
             self.new_round();
         };
 
         Ok(())
     }
 
-    fn undo(&mut self) -> Result<(), &'static str> {
+    fn undo_action(&mut self) -> Result<(), &'static str> {
         let entry= self.history.pop().ok_or("No action to undo")?;
+
+        if !entry.cards_dealt.is_empty() {
+            for (color, _) in &entry.cards_dealt {
+                let player = self.player_mut_by_color(*color);
+                player.cards.clear();
+            }
+        }
+
         let entry_player_color = entry.action.player;
         let played_card = entry.action.card;
 
@@ -707,8 +735,6 @@ impl DogGame for Game {
             },
         }
 
-
-        
         Ok(())
     }
     
@@ -728,7 +754,7 @@ impl DogGame for Game {
                 )
             };
 
-            self.undo()?;
+            self.undo_action()?;
 
             match action_kind {
                 ActionKind::Split(_, _) => {
@@ -758,11 +784,13 @@ impl DogGame for Game {
     }
         
     fn new_round(&mut self) {
+
+        self.deck = Deck::new();
+        self.deck.shuffle();
+        self.discard.clear();
+
         let current_round = (self.round % 4) as usize;
         let cards_to_deal = CARDS_PER_ROUND[current_round];
-        if self.deck.len() <= (cards_to_deal as usize * 4 ){
-            self.deck.replenish(&mut self.discard);
-        }
 
         for _ in 0..cards_to_deal {
             self.red.cards.push(self.deck.draw().unwrap());
@@ -772,8 +800,25 @@ impl DogGame for Game {
         }
 
         self.trading_phase = true;
+
+        self.current_player_color = match self.round % 4 {
+            0 => Color::Yellow, 
+            1 => Color::Red,
+            2 => Color::Green,
+            3 => Color::Blue,
+            _ => unreachable!(),
+        };
         
         self.round += 1;
+
+        if let Some(entry) = self.history.last_mut() {
+            entry.cards_dealt = vec![
+                (Color::Red, self.red.cards.clone()),
+                (Color::Green, self.green.cards.clone()),
+                (Color::Blue, self.blue.cards.clone()),
+                (Color::Yellow, self.yellow.cards.clone()),
+            ];
+        }
     }
     
     fn is_winner(&self) -> bool {
@@ -2567,7 +2612,7 @@ mod tests {
                 let mut game = Game::new();
                 game.trading_phase = false;
 
-                assert!(game.undo().is_err());
+                assert!(game.undo_action().is_err());
             }
 
             mod undo_place_tests {
@@ -2591,7 +2636,7 @@ mod tests {
                     assert_eq!(game.red.pieces_to_place, 3);
                     assert!(!game.red.cards.contains(&Card::Ace));
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert!(game.board.tiles[0].is_none());
                     assert_eq!(game.red.pieces_to_place, 4);
                     assert!(game.red.cards.contains(&Card::Ace));
@@ -2613,7 +2658,7 @@ mod tests {
                     assert!(game.action(Card::Ace, action).is_ok());
                     assert_ne!(game.current_player_color, Color::Red);
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.current_player_color, Color::Red);
                 }
 
@@ -2655,7 +2700,7 @@ mod tests {
                     assert_eq!(game.blue.pieces_to_place, 3);
                     assert!(!game.red.cards.contains(&Card::Ace));
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert!(game.board.tiles[32].is_none());
                     assert_eq!(game.blue.pieces_to_place, 4);
                     assert!(game.red.cards.contains(&Card::Ace));
@@ -2685,7 +2730,7 @@ mod tests {
                     assert_eq!(game.red.pieces_to_place, 3);
                     assert!(!game.red.cards.contains(&Card::Ace));
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.board.tiles[0].as_ref().unwrap().color, Color::Green);
                     assert_eq!(game.red.pieces_to_place, 4);
                     assert!(game.red.cards.contains(&Card::Ace));
@@ -2717,7 +2762,7 @@ mod tests {
                     assert_eq!(game.board.tiles[5].as_ref().unwrap().left_start, true);
                     assert!(!game.red.cards.contains(&Card::Five));
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert!(game.board.tiles[5].is_none());
                     assert!(game.red.cards.contains(&Card::Five));
                     assert_eq!(game.board.check_tile(0).unwrap().left_start, false);
@@ -2753,13 +2798,13 @@ mod tests {
                     assert!(game.action(Card::Ace, action2).is_ok());
 
                     // First undo
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.board.tiles[65].as_ref().unwrap().color, Color::Red);
                     assert!(game.board.tiles[66].is_none());
                     assert_eq!(game.red.pieces_in_house, 1);
 
                     // Second undo
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.board.tiles[0].as_ref().unwrap().color, Color::Red);
                     assert!(game.board.tiles[65].is_none());
                     assert_eq!(game.red.pieces_in_house, 0);
@@ -2786,7 +2831,7 @@ mod tests {
                     assert!(game.action(Card::Two, action).is_ok());
                     assert!(!game.red.cards.contains(&Card::Two));
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert!(game.red.cards.contains(&Card::Two));
                     assert_eq!(game.red.pieces_in_house, 0);
                 }
@@ -2816,7 +2861,7 @@ mod tests {
 
                     assert!(game.action(Card::Two, _action).is_ok());
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.board.tiles[2].as_ref().unwrap().color, Color::Green);
                     assert_eq!(game.board.tiles[2].as_ref().unwrap().left_start, true);
 
@@ -2847,7 +2892,7 @@ mod tests {
 
                     assert!(game.action(Card::Two, action).is_ok());
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.red.pieces_in_house, 0);
                     assert!(game.blue.cards.contains(&Card::Two));
                 }
@@ -2873,7 +2918,7 @@ mod tests {
                     assert!(game.action(Card::Five, action).is_ok());
                     assert_ne!(game.current_player_color, Color::Red);
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.current_player_color, Color::Red);
                 }
 
@@ -2924,7 +2969,7 @@ mod tests {
                     assert_eq!(game.current_player_color, Color::Red);
                     assert_eq!(game.history.last().unwrap().split_rest_before, None);
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.split_rest, None);
                     assert!(game.board.tiles[5].is_none());
                     assert_eq!(game.board.tiles[0].as_ref().unwrap().color, Color::Red);
@@ -2953,7 +2998,7 @@ mod tests {
                     assert_eq!(game.red.pieces_in_house, 1);
                     assert_eq!(game.split_rest, Some(4));
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.red.pieces_in_house, 0);
                     assert_eq!(game.board.tiles[63].as_ref().unwrap().color, Color::Red);
                     assert_eq!(game.split_rest, None);
@@ -2988,14 +3033,14 @@ mod tests {
                     assert_eq!(game.green.pieces_to_place, 4);
 
                     // First undo
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.split_rest, Some(4));
                     assert!(game.board.tiles[5].is_none());
                     assert_eq!(game.board.tiles[3].as_ref().unwrap().color, Color::Red);
                     assert!(game.board.tiles[0].is_none());
 
                     // Second undo
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.split_rest, None);
                     assert_eq!(game.board.tiles[3].as_ref().unwrap().color, Color::Green);
                     assert_eq!(game.board.tiles[0].as_ref().unwrap().color, Color::Red);
@@ -3038,13 +3083,13 @@ mod tests {
                     assert_eq!(game.current_player_color, Color::Green);
 
                     // First undo
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.split_rest, Some(2));
                     assert!(game.board.tiles[9].is_none());
                     assert_eq!(game.board.tiles[7].as_ref().unwrap().color, Color::Blue);
 
                     // Second undo
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.split_rest, None);
                     assert!(game.board.tiles[5].is_none());
                     assert_eq!(game.board.tiles[0].as_ref().unwrap().color, Color::Red);
@@ -3072,7 +3117,7 @@ mod tests {
                     assert!(!game.red.cards.contains(&Card::Joker));
                     assert_eq!(game.split_rest, None);
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert!(game.red.cards.contains(&Card::Joker));
                     assert_eq!(game.split_rest, None);
                 }
@@ -3099,7 +3144,7 @@ mod tests {
                     assert_eq!(game.current_player_color, Color::Red);
                     assert_eq!(game.split_rest, Some(2));
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.current_player_color, Color::Red);
                     assert_eq!(game.split_rest, None);
                 }
@@ -3145,7 +3190,7 @@ mod tests {
                     assert!(!game.red.cards.contains(&Card::Ace));
                     assert!(game.discard.contains(&Card::Ace));
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert!(game.red.cards.contains(&Card::Ace));
                     assert!(!game.discard.contains(&Card::Ace));
                 }
@@ -3168,7 +3213,7 @@ mod tests {
                     assert!(game.action(Card::Ace, action).is_ok());
                     assert_ne!(game.current_player_color, current_player);
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.current_player_color, current_player);
                 }
             }
@@ -3203,7 +3248,7 @@ mod tests {
                     assert_eq!(game.board.tiles[0].as_ref().unwrap().color, Color::Green);
                     assert_eq!(game.board.tiles[1].as_ref().unwrap().color, Color::Red);
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.board.tiles[0].as_ref().unwrap().color, Color::Red);
                     assert_eq!(game.board.tiles[1].as_ref().unwrap().color, Color::Green);
                     assert!(game.red.cards.contains(&Card::Jack));
@@ -3235,7 +3280,7 @@ mod tests {
                     assert_eq!(game.red.cards[0], Card::Ten);
                     assert_eq!(game.trade_buffer.len(), 1);
 
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert_eq!(game.red.cards.len(), 2);
                     assert!(game.red.cards.contains(&Card::Five));
                     assert!(game.red.cards.contains(&Card::Ten));
@@ -3308,28 +3353,28 @@ mod tests {
                     assert!(game.yellow.cards.contains(&Card::Two));
 
                     // Undo last trade (yellow)
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert!(game.trading_phase);
                     assert_eq!(game.trade_buffer.len(), 3);
                     assert_eq!(game.yellow.cards.len(), 2);
                     assert!(game.yellow.cards.contains(&Card::Nine));
 
                     // Undo third trade (blue)
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert!(game.trading_phase);
                     assert_eq!(game.trade_buffer.len(), 2);
                     assert_eq!(game.blue.cards.len(), 2);
                     assert!(game.blue.cards.contains(&Card::Seven));
 
                     // Undo second trade (green)
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert!(game.trading_phase);
                     assert_eq!(game.trade_buffer.len(), 1);
                     assert_eq!(game.green.cards.len(), 2);
                     assert!(game.green.cards.contains(&Card::Two));
 
                     // Undo first trade (red)
-                    assert!(game.undo().is_ok());
+                    assert!(game.undo_action().is_ok());
                     assert!(game.trading_phase);
                     assert_eq!(game.trade_buffer.len(), 0);
                     assert_eq!(game.red.cards.len(), 2);

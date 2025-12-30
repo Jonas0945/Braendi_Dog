@@ -12,5 +12,8 @@ pub struct HistoryEntry {
     pub split_rest_before: Option<u8>,
     pub trade_buffer_before: Vec<(Color, Card)>,
     pub left_start_before: bool,
+
+    pub cards_dealt: Vec<(Color, Vec<Card>)>
 }
+
 
