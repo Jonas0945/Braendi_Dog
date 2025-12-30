@@ -109,7 +109,7 @@ impl DogGame for Game {
         Self {
             board: Board::new(),
             history: Vec::new(),
-            round: 0,
+            round: 1,
 
             trading_phase: true,
             trade_buffer: Vec::new(),
@@ -790,7 +790,7 @@ impl DogGame for Game {
         self.discard.clear();
 
         let current_round = (self.round % 4) as usize;
-        let cards_to_deal = CARDS_PER_ROUND[current_round];
+        let cards_to_deal = CARDS_PER_ROUND[current_round - 1];
 
         for _ in 0..cards_to_deal {
             self.red.cards.push(self.deck.draw().unwrap());
