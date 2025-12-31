@@ -64,6 +64,23 @@ fn draw_current_player(game: &Game) {
         p.pieces_in_house,
         p.pieces_to_place
     );
+
+    if let Some(steps_left) = game.split_rest {
+        println!("Split-Rest: {} Schritte verbleibend", steps_left);
+    }
+
+    let positions: Vec<usize> = game
+        .board_state()
+        .iter()
+        .enumerate()
+        .filter(|(_, tile)| {
+            tile.map_or(false, |piece| piece.color == p.color)
+        })
+        .map(|(idx, _)| idx)
+        .collect();
+
+    println!("Figurenpositionen: {:?}", positions);
+    
     println!();
 }
 

@@ -26,7 +26,7 @@ pub struct Game {
     yellow: Player,
 
     current_player_color: Color,
-    split_rest: Option<u8>,
+    pub split_rest: Option<u8>,
 }
 
 impl Game {
@@ -599,6 +599,8 @@ impl DogGame for Game {
                 let player = self.player_mut_by_color(*color);
                 player.cards.clear();
             }
+            self.trading_phase = false;
+            self.round -= 1;
         }
 
         let entry_player_color = entry.action.player;
