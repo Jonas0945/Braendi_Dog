@@ -50,6 +50,8 @@ fn cell_char(board: &[Option<Piece>; 80], idx: usize) -> char {
             Color::Green => 'G',
             Color::Blue => 'B',
             Color::Yellow => 'Y',
+            Color::Purple => 'P',
+            Color::Orange => 'O',
         },
         None => '.',
     }

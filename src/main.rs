@@ -3,7 +3,7 @@ use std::fs::OpenOptions;
 use std::str::FromStr;
 
 fn main() {
-    let mut game = Game::new();
+    let mut game = Game::new(new_2v2);
     let log_file_path = "game_log.txt";
 
     game.new_round();

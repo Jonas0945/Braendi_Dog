@@ -33,93 +33,58 @@
 // 40                          72                              23
 // |                           |                               |
 // 39––38––37––36––35––34––33––32––31––30––29––28––27––26––25––24
-use super::color::Color;
 use super::piece::Piece;
 
-pub type Point = u8; // 0–79
-
-pub const HOUSE_TILES: [Point; 16] = [
-    64, 65, 66, 67, 68, 69, 70, 71,
-    72, 73, 74, 75, 76, 77, 78, 79
-];
-
-pub const PLAYER_HOUSE_BY_COLOR: [(Color, [Point; 4]); 4] = [
-    (Color::Red,    [64, 65, 66, 67]),
-    (Color::Green,  [68, 69, 70, 71]),
-    (Color::Blue,   [72, 73, 74, 75]),
-    (Color::Yellow, [76, 77, 78, 79]),
-];
-
-pub const PLAYER_HOUSE_BY_TILE: [(Point, [Point; 4]); 4] = [
-    (0,    [64, 65, 66, 67]),
-    (16,  [68, 69, 70, 71]),
-    (32,   [72, 73, 74, 75]),
-    (48, [76, 77, 78, 79]),
-];
+pub type Point = usize; // 0–79
+pub const HOUSE_SIZE: usize = 4;
 
 pub struct Board {
-    pub tiles: [Option<Piece>; 80],
+    pub tiles: Vec<Option<Piece>>,
+    pub ring_size: usize,
 }
 
 impl Board {
-    pub fn new() -> Self {
+    pub fn new(num_players: usize) -> Self {
+        let ring_size = num_players * 16;
+        let total_tiles = ring_size + num_players * HOUSE_SIZE;
+
         Self {
-            tiles: [None; 80],
+            tiles: vec![None; total_tiles],
+            ring_size,
         }
     }
-    pub fn get_board(&self) -> &[Option<Piece>; 80] {
+
+    pub fn get_board(&self) -> &Vec<Option<Piece>> {
         &self.tiles
     }
 
     pub fn check_tile(&self, p: Point) -> Option<Piece> {
-        self.tiles[p as usize]
+        self.tiles[p]
     }
 
-    pub fn start_field(color: Color) -> Point {
-        match color {
-            Color::Red => 0,
-            Color::Green => 16,
-            Color::Blue => 32, 
-            Color::Yellow => 48,
-        }
+    pub fn start_field(&self,player_index: usize) -> Point {
+        player_index * 16
     }
 
-    pub fn house_entry(&self, color: Color) -> Point {
-        match color {
-            Color::Red => 0,
-            Color::Green => 16,
-            Color::Blue => 32, 
-            Color::Yellow => 48,
-        }
+    pub fn house_gateway(&self, player_index: usize) -> Point {
+        self.ring_size + player_index * HOUSE_SIZE
     }
 
-    pub fn house_by_color(&self, color: Color) -> [u8; 4] {
-        match color {
-            Color::Red =>    [64, 65, 66, 67],
-            Color::Green =>  [68, 69, 70, 71],
-            Color::Blue =>   [72, 73, 74, 75],
-            Color::Yellow => [76, 77, 78, 79],
-        }
+    pub fn house_by_player(&self, player_index: usize) -> Vec<usize> {
+        let start = self.house_gateway(player_index);
+        (start..start + HOUSE_SIZE).collect()
     }
 
-    pub fn house_gateway(& self, color: Color) -> Point {
-        match color {
-            Color::Red => 64,
-            Color::Green => 68,
-            Color::Blue => 72,
-            Color::Yellow => 76,
-        }
-    }
-
-    pub fn distance_between(&self, from: u8, to: u8, color: Color) -> Option<u8> {
-        let ring_size = 64;
+    pub fn distance_between(&self, from: usize, to: usize, player_index: usize) -> Option<u8> {
+        let ring_size = self.ring_size;
+        let total_tiles = self.tiles.len();
 
         // Check for out-of-bounds positions
-        if from > 79 || to > 79 {
+        if from >= total_tiles || to >= total_tiles {
             return None;
         }
 
-        let house = self.house_by_color(color);
+        let house = self.house_by_player(player_index);
 
         // Piece already in house
         if from >= ring_size {
@@ -129,7 +94,7 @@ impl Board {
                 return None;
             }
 
-            return Some(to - from);
+            return (to - from).try_into().ok();
         }
         
         // Moving from the ring into the house
@@ -139,33 +104,35 @@ impl Board {
                 return None; 
             }
 
-            let house_entry = self.house_entry(color);
-
+            let house_entry = self.start_field(player_index); // Equals start_field
             let distance_to_house_entry = (house_entry + ring_size - from) % ring_size;
-
-            let steps_in_house = to - self.house_gateway(color);
+            let steps_in_house = to - self.house_gateway(player_index);
 
             // Total distance
-            return Some(distance_to_house_entry as u8 + 1 + steps_in_house as u8);
+            return (distance_to_house_entry + 1 + steps_in_house)
+                .try_into()
+                .ok();
         } 
         
         // Moving around the ring
-        else {
-
             let distance = (to + ring_size - from) % ring_size;
             Some(distance as u8)
-        }
     }
 
-    pub fn passed_tiles(&self, from: u8, to:u8, color: Color, backward: bool) -> Option<Vec<Point>> {
-        let ring_size = 64;
-        let mut tiles = Vec::new();
+    pub fn passed_tiles(&self, from: usize, to: usize, player_index: usize, backward: bool) -> Option<Vec<Point>> {
+        let ring_size = self.ring_size;
+        let total_tiles = self.tiles.len();
+        let mut passed_tiles = Vec::new();
         let mut current_position = from;
 
+        if from >= total_tiles || to >= total_tiles {
+            return None;
+        }
+
         let distance = if backward {
-            self.distance_between(to, from, color)?
+            self.distance_between(to, from, player_index)?
         } else {
-            self.distance_between(from, to, color)?
+            self.distance_between(from, to, player_index)?
         };
 
         // Piece already in house
@@ -177,12 +144,10 @@ impl Board {
             }
 
             for pos in (from + 1)..= to {
-                tiles.push(pos);
+                passed_tiles.push(pos);
             }
 
-            return Some(tiles);
-
-        
+            return Some(passed_tiles);
         }
         
         // Moving from the ring into the house
@@ -193,23 +158,23 @@ impl Board {
                 return None;
             }
 
-            let house_entry = self.house_entry(color);
-            let house_gateway = self.house_gateway(color);
+            let house_entry = self.start_field(player_index);
+            let house_gateway = self.house_gateway(player_index);
 
             // Add tiles to house entry
             while current_position != house_entry {
                 current_position = (current_position + 1) % ring_size;
-                tiles.push(current_position);
+                passed_tiles.push(current_position);
             }
 
             // Add first tile in house
-            tiles.push(house_gateway);
+            passed_tiles.push(house_gateway);
 
             for pos in (house_gateway + 1)..= to {
-                tiles.push(pos);
+                passed_tiles.push(pos);
             }
 
-            return Some(tiles);
+            return Some(passed_tiles);
         }
 
         // Normal ring movement   
@@ -219,10 +184,10 @@ impl Board {
             } else {
                 (current_position + 1) % ring_size
             };
-            tiles.push(current_position);
+            passed_tiles.push(current_position);
         }
 
-        Some(tiles)
+        Some(passed_tiles)
     }
 }
 
@@ -235,41 +200,41 @@ mod tests {
 
         #[test]
         fn ring() {
-            let board = Board::new();
+            let board = Board::new(4);
 
-            assert_eq!(board.distance_between(0, 3, Color::Red), Some(3));
-            assert_eq!(board.distance_between(62, 2, Color::Red), Some(4));
+            assert_eq!(board.distance_between(0, 3, 0), Some(3));
+            assert_eq!(board.distance_between(62, 2, 0), Some(4));
         }
 
         #[test]
         fn into_house() {
-            let board = Board::new();
+            let board = Board::new(4);
 
-            assert_eq!(board.distance_between(62, 64, Color::Red), Some(3));
+            assert_eq!(board.distance_between(62, 64, 0), Some(3));
         }
 
         #[test]
         fn wrong_house() {
-            let board = Board::new();
+            let board = Board::new(4);
 
-            assert_eq!(board.distance_between(62, 64, Color::Green), None);
+            assert_eq!(board.distance_between(62, 64, 1), None);
         }
 
         #[test]
         fn inside_house() {
-            let board = Board::new();
-            let house = board.house_by_color(Color::Green);
+            let board = Board::new(4);
+            let house = board.house_by_player(1);
 
-            assert_eq!(board.distance_between(house[0], house[2], Color::Green), Some(2));
+            assert_eq!(board.distance_between(house[0], house[2], 1), Some(2));
         }
 
         #[test]
         fn invalid_positions() {
-            let board = Board::new();
+            let board = Board::new(4);
             
-            assert_eq!(board.distance_between(80, 0, Color::Red), None);
-            assert_eq!(board.distance_between(0, 80, Color::Red), None);
-            assert_eq!(board.distance_between(81, 90, Color::Blue), None);
+            assert_eq!(board.distance_between(80, 0, 0), None);
+            assert_eq!(board.distance_between(0, 80, 0), None);
+            assert_eq!(board.distance_between(81, 90, 2), None);
         }
     }
     
@@ -278,81 +243,81 @@ mod tests {
 
         #[test]
         fn ring_forward() {
-            let board = Board::new();
+            let board = Board::new(4);
             
             assert_eq!(
-                board.passed_tiles(0, 3, Color::Red, false),
+                board.passed_tiles(0, 3, 0, false),
                 Some(vec![1, 2, 3])
             );
             assert_eq!(
-                board.passed_tiles(62, 2, Color::Red, false),
+                board.passed_tiles(62, 2, 0, false),
                 Some(vec![63, 0, 1, 2])
             );
         }
 
         #[test]
         fn ring_backward() {
-            let board = Board::new();
+            let board = Board::new(4);
             
             assert_eq!(
-                board.passed_tiles(3, 0, Color::Red, true),
+                board.passed_tiles(3, 0, 0, true),
                 Some(vec![2, 1, 0])
             );
             assert_eq!(
-                board.passed_tiles(2, 62, Color::Red, true),
+                board.passed_tiles(2, 62, 0, true),
                 Some(vec![1, 0, 63, 62])
             );
         }
 
         #[test]
         fn inside_house_forward() {
-            let board = Board::new();
-            let house = board.house_by_color(Color::Blue);
+            let board = Board::new(4);
+            let house = board.house_by_player(2);
 
             assert_eq!(
-                board.passed_tiles(house[0], house[2], Color::Blue, false),
+                board.passed_tiles(house[0], house[2], 2, false),
                 Some(vec![house[1], house[2]])
             );
         }
 
         #[test]
         fn inside_house_backward() {
-            let board = Board::new();
-            let house = board.house_by_color(Color::Blue);
+            let board = Board::new(4);
+            let house = board.house_by_player(2);
 
             assert_eq!(
-                board.passed_tiles(house[2], house[1], Color::Blue, true),
+                board.passed_tiles(house[2], house[1], 2, true),
                 None
             );
         }
 
         #[test]
         fn into_house_forward() {
-            let board = Board::new();
+            let board = Board::new(4);
 
             assert_eq!(
-                board.passed_tiles(62, 64, Color::Red, false),
+                board.passed_tiles(62, 64, 0, false),
                 Some(vec![63, 0, 64])
             );
         }
 
         #[test]
         fn into_house_backward() {
-            let board = Board::new();
+            let board = Board::new(4);
 
             assert_eq!(
-                board.passed_tiles(64, 62, Color::Red, true),
+                board.passed_tiles(64, 62, 0, true),
                 None
             );
         }
 
         #[test]
         fn invalid_positions() {
-            let board = Board::new();
+            let board = Board::new(4);
             
-            assert_eq!(board.passed_tiles(80, 0, Color::Red, false), None);
-            assert_eq!(board.passed_tiles(0, 80, Color::Red, false), None);
-            assert_eq!(board.passed_tiles(81, 90, Color::Blue, false), None);
+            assert_eq!(board.passed_tiles(80, 0, 0, false), None);
+            assert_eq!(board.passed_tiles(0, 80, 0, false), None);
+            assert_eq!(board.passed_tiles(81, 90, 2, false), None);
         }
     }
 }

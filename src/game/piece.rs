@@ -1,20 +1,14 @@
-use super::color::Color;
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Piece {
-    pub color: Color,
+    pub owner: usize,
     pub left_start: bool,
 }
 
 impl Piece {
-    pub fn new(color: Color) -> Self {
+    pub fn new(owner: usize) -> Self {
         Self {
-            color,
+            owner,
             left_start: false,
         }
-    }
-
-    pub fn color(&self) -> Color {
-        self.color
     }
 }
