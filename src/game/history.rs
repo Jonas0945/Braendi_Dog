@@ -1,4 +1,3 @@
-use crate::game::color::Color;
 use crate::game::card::Card;
 use super::action::*;
 
@@ -13,7 +12,7 @@ pub struct HistoryEntry {
     pub trade_buffer_before: Vec<(usize, Card)>,
     pub left_start_before: bool,
 
-    pub cards_dealt: Vec<(Color, Vec<Card>)>
+    pub cards_dealt: Vec<(usize, Vec<Card>)>
 }
 
 

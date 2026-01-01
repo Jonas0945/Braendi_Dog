@@ -21,7 +21,7 @@ pub enum GameVariant {
 pub struct Game {
     pub board: Board,
     pub history: Vec<HistoryEntry>,
-    pub round: u8,
+    pub round: usize,
     
     pub trading_phase: bool,
     pub trade_buffer: Vec<(usize,Card)>,
@@ -448,7 +448,6 @@ impl DogGame for Game {
                 let left_start_before = moving_piece.left_start;
 
                 let current_player_index = self.current_player_index;
-                let current_player = self.current_player();
 
                 if !self.can_control_piece(current_player_index, moving_piece.owner) {
                     return Err("You cannot move this piece.");
@@ -555,8 +554,6 @@ impl DogGame for Game {
                 if !a_piece.left_start || !b_piece.left_start {
                     return Err("Cannot interchange with protected piece.")
                 }
-
-                let interchanged_color = b_piece.owner;
 
                 self.board.tiles[a] = Some(b_piece);
                 self.board.tiles[b] = Some(a_piece);
@@ -826,84 +823,93 @@ impl DogGame for Game {
         let entry= self.history.pop().ok_or("No action to undo")?;
 
         if !entry.cards_dealt.is_empty() {
-            for (color, _) in &entry.cards_dealt {
-                let player = self.player_mut_by_color(*color);
-                player.cards.clear();
+            for (player_index, _) in &entry.cards_dealt {
+                self.players[*player_index].cards.clear();
             }
+
             self.trading_phase = false;
             self.round -= 1;
         }
 
-        let entry_player_color = entry.action.player;
+        let entry_player_index = self.index_of_color(entry.action.player);
         let played_card = entry.action.card;
 
         match entry.action.action {
-            ActionKind::Place => {
-                let placed_piece_owner = entry.placed_piece_owner.unwrap();
-                let start = Board::start_field(placed_piece_owner) as usize;
+            ActionKind::Place { .. }=> {
+                let placed_piece_owner = entry
+                    .placed_piece_owner
+                    .expect("Place undo requires placed_piece_owner");
 
-                self.board.tiles[start].take();
-                self.player_mut_by_color(placed_piece_owner).pieces_to_place += 1;
+                let start = self.board.start_field(placed_piece_owner);
+
+                self.board.tiles[start] = None;
+                self.players[placed_piece_owner].pieces_to_place += 1;
 
                 if let Some(beaten_piece_owner) = entry.beaten_piece_owner {
                     self.board.tiles[start] = Some(Piece {
-                        color: beaten_piece_owner,
+                        owner: beaten_piece_owner,
                         left_start: true,
                     });
 
-                    self.player_mut_by_color(beaten_piece_owner).pieces_to_place -= 1;
+                    self.players[beaten_piece_owner].pieces_to_place -= 1;
                 }
 
                 self.discard.pop();
-                self.player_mut_by_color(entry_player_color).cards.push(played_card);
+                self.players[entry_player_index].cards.push(played_card);
 
-                self.current_player_index = entry_player_color;
+                self.current_player_index = entry_player_index;
             },
 
-            ActionKind::Interchange(from, to) => {
-                let from_index = from as usize;
-                let to_index = to as usize;
+            ActionKind::Interchange { a, b } => {
+                let (a_owner, b_owner) = entry
+                    .interchanged_piece_owner
+                    .ok_or("Missing interchanged_piece_owner in history")?;
 
-                let from_piece = self.board.tiles[from_index].take();
-                let to_piece = self.board.tiles[to_index].take();
+                self.board.tiles[a] = Some(Piece {
+                    owner: a_owner,
+                    left_start: true,
+                });
 
-                self.board.tiles[from_index] = to_piece;
-                self.board.tiles[to_index] = from_piece;
+                self.board.tiles[b] = Some(Piece {
+                    owner: b_owner,
+                    left_start: true,
+                });
 
                 self.discard.pop();
-                self.player_mut_by_color(entry_player_color).cards.push(played_card);
+                self.players[entry_player_index].cards.push(played_card);
 
-                self.current_player_index = entry_player_color;
+                self.current_player_index = entry_player_index;
             },
 
-            ActionKind::Move(from, to) => {
-                let from_index = from as usize;
-                let to_index = to as usize;
+            ActionKind::Move { from, to } => {
 
-                let moved_piece = self.board.tiles[to_index].take();
-                let moved_piece_color = moved_piece.unwrap().color;
-                self.board.tiles[from_index] = Some(Piece { 
-                    color: moved_piece_color, 
+
+                let moved_piece = self.board.tiles[to]
+                    .take()
+                    .ok_or("Expected moved piece on target tile")?;
+
+                self.board.tiles[from] = Some(Piece { 
+                    owner: moved_piece.owner, 
                     left_start: entry.left_start_before 
                 });
 
-                if from_index < self.board.ring_size && to_index >= self.board.ring_size {
-                    self.player_mut_by_color(moved_piece_color).pieces_in_house -= 1;
+                if from < self.board.ring_size && to >= self.board.ring_size {
+                    self.players[moved_piece.owner].pieces_in_house -= 1;
                 }
 
                 if let Some(beaten_piece_owner) = entry.beaten_piece_owner {
-                    self.board.tiles[to_index] = Some(Piece {
-                        color: beaten_piece_owner,
+                    self.board.tiles[to] = Some(Piece {
+                        owner: beaten_piece_owner,
                         left_start: true,
                     });
 
-                    self.player_mut_by_color(beaten_piece_owner).pieces_to_place -= 1;
+                    self.players[beaten_piece_owner].pieces_to_place -= 1;
                 }
 
                 self.discard.pop();
-                self.player_mut_by_color(entry_player_color).cards.push(played_card);
+                self.players[entry_player_index].cards.push(played_card);
 
-                self.current_player_index = entry_player_color;
+                self.current_player_index = entry_player_index;
             },
 
             ActionKind::Trade => {
@@ -912,59 +918,67 @@ impl DogGame for Game {
                 if entry.trade_buffer_before.len() == 3 {
                     
                     let mut trades: Vec<_> = entry.trade_buffer_before.clone();
-                    trades.push((entry_player_color, played_card));
+                    trades.push((entry_player_index, played_card));
 
-                    for (player_color, card) in trades {
-                        let teammate_color = player_color.teammate();
-
-                        self.player_mut_by_color(teammate_color).remove_card(card);
+                    for (player_index, card) in trades {
+                        for teammate_index in self.teammate_indices(player_index) {
+                            let pos = self.players[teammate_index]
+                                .cards
+                                .iter()
+                                .position(|&c| c == card)
+                                .expect("Traded card must exist in teammate hand");
+                            self.players[teammate_index].cards.remove(pos);
+                        }
                     }
 
                     self.trading_phase = true;
 
                 }
 
-                self.player_mut_by_color(entry_player_color).cards.push(played_card);
+                self.players[entry_player_index].cards.push(played_card);
                 self.trade_buffer = entry.trade_buffer_before;
-                self.current_player_index = entry_player_color;
+                self.current_player_index = entry_player_index;
             },
 
-            ActionKind::Split(from, to) => {
-                let from_index = from as usize;
-                let to_index = to as usize;
+            ActionKind::Split { from, to } => {
 
-                let moved_piece = self.board.tiles[to_index].take();
-                let moved_piece_color = moved_piece.unwrap().color;
-                self.board.tiles[from_index] = moved_piece;
+                let moved_piece = self.board.tiles[to]
+                    .take()
+                    .ok_or("No piece to undo split")?;
 
-                if from_index < self.board.ring_size && to_index >= self.board.ring_size {
-                    self.player_mut_by_color(moved_piece_color).pieces_in_house -= 1;
+                self.board.tiles[from] = Some(Piece {
+                    owner: moved_piece.owner,
+                    left_start: entry.left_start_before
+                });
+
+                if from < self.board.ring_size && to >= self.board.ring_size {
+                    self.players[moved_piece.owner].pieces_in_house -= 1;
                 }
 
                 if let Some(beaten_piece_owner) = entry.beaten_piece_owner {
-                    self.board.tiles[to_index] = Some(Piece {
-                        color: beaten_piece_owner,
+                    self.board.tiles[to] = Some(Piece {
+                        owner: beaten_piece_owner,
                         left_start: true,
                     });
 
-                    self.player_mut_by_color(beaten_piece_owner).pieces_to_place -= 1;
+                    self.players[beaten_piece_owner].pieces_to_place -= 1;
                 }
 
                 // Return card if split just began
                 if entry.split_rest_before.is_none() {
                     self.discard.pop();
-                    self.player_mut_by_color(entry_player_color).cards.push(played_card);
+                    self.players[entry_player_index].cards.push(played_card);
                 }
 
                 self.split_rest = entry.split_rest_before;
-                self.current_player_index = entry_player_color;                
+                self.current_player_index = entry_player_index;                
             },
 
             ActionKind::Remove => {
                 self.discard.pop();
-                self.player_mut_by_color(entry_player_color).cards.push(played_card);
+                self.players[entry_player_index].cards.push(played_card);
 
-                self.current_player_index = entry_player_color;
+                self.current_player_index = entry_player_index;
             },
         }
 
@@ -990,7 +1004,7 @@ impl DogGame for Game {
             self.undo_action()?;
 
             match action_kind {
-                ActionKind::Split(_, _) => {
+                ActionKind::Split { .. } => {
                     if split_rest_before.is_none() {
                         break;
                     }
@@ -1018,47 +1032,55 @@ impl DogGame for Game {
         
     fn new_round(&mut self) {
 
+        // Reset deck & discard
         self.deck = Deck::new();
         self.deck.shuffle();
         self.discard.clear();
 
-        let current_round = (self.round % 4) as usize;
-        let cards_to_deal = CARDS_PER_ROUND[current_round - 1];
+        
+        let round_index = (self.round - 1) % 4;
+        let cards_to_deal = CARDS_PER_ROUND[round_index as usize];
 
+        // Deal cards
         for _ in 0..cards_to_deal {
-            self.red.cards.push(self.deck.draw().unwrap());
-            self.green.cards.push(self.deck.draw().unwrap());
-            self.blue.cards.push(self.deck.draw().unwrap());
-            self.yellow.cards.push(self.deck.draw().unwrap());
+            for player in &mut self.players {
+                player.cards.push(
+                    self.deck.draw().expect("Deck should contain enough cards"),
+                );
+            }
         }
 
         self.trading_phase = true;
 
-        self.current_player_index = match self.round % 4 {
-            0 => Color::Yellow, 
-            1 => Color::Red,
-            2 => Color::Green,
-            3 => Color::Blue,
-            _ => unreachable!(),
-        };
+        // Starting player rotates by round
+        self.current_player_index = (self.round - 1) % self.players.len();
         
         self.round += 1;
 
         if let Some(entry) = self.history.last_mut() {
-            entry.cards_dealt = vec![
-                (Color::Red, self.red.cards.clone()),
-                (Color::Green, self.green.cards.clone()),
-                (Color::Blue, self.blue.cards.clone()),
-                (Color::Yellow, self.yellow.cards.clone()),
-            ];
+            entry.cards_dealt = self.players
+                .iter()
+                .enumerate()
+                .map(|(i, p)| (i, p.cards.clone()))
+                .collect();
         }
     }
     
     fn is_winner(&self) -> bool {
-        let current_player = self.current_player();
-        let teammate = self.player_by_color(self.current_player_index.teammate());
+        let current_index = self.current_player_index;
 
-        current_player.pieces_in_house == 4 && teammate.pieces_in_house == 4
+        if let Some(teams) = &self.teams {
+            
+            if let Some(team) = teams.iter().find(|t| t.contains(&current_index)) {
+                // Team wins if all members have 4 pieces in house
+                return team.iter().all(|&i| self.players[i].pieces_in_house == 4);
+            }
+        } else {
+            // Free-for-all: player wins if he has 4 pieces in house
+            return self.players[current_index].pieces_in_house == 4;
+        }
+
+        false
     }
 }
 
@@ -1086,7 +1108,7 @@ mod tests {
                 let mut game = setup_game();
                 game.trading_phase = false;
 
-                let input = "R 1 P"; // Red places with Ace
+                let input = "R 1 P 0"; // Red places with Ace
 
                 assert!(game.play(input).is_ok());
 
@@ -1097,7 +1119,7 @@ mod tests {
             #[test]
             fn play_invalid_card_string() {
                 let mut game = setup_game();
-                let input = "R X P";
+                let input = "R X P 0";
 
                 assert!(game.play(input).is_err());
                 assert_eq!(game.current_player_index, 0);
@@ -1142,7 +1164,7 @@ mod tests {
 
                 game.players[0].cards = vec![Card::Joker];
 
-                assert!(game.play("R 0 P").is_ok());
+                assert!(game.play("R 0 P 0").is_ok());
                 assert_eq!(game.board.tiles[0].as_ref().unwrap().owner, 0);
                 assert_eq!(game.players[0].pieces_to_place, 3)
             }
