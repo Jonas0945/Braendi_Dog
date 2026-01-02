@@ -1,38 +1,7 @@
-// 56––57––58––59––60––61––62––63–– 0–– 1–– 2–– 3–– 4–– 5–– 6––7
-// |                               |                           |
-// 55                              64                          8
-// |                               |                           |
-// 54                              65                          9
-// |                               |                           |
-// 53                              66                          10
-// |                               |                           |
-// 52                              67                          11
-// |                                                           |
-// 51                            RED                           12
-// |                                                           |
-// 50                                                          13
-// |                                                           |
-// 49                                                          14
-// |              YELLOW                                       |
-// 48––76––77––78––79                                          15
-// |                                           GREEN           |
-// 47                                          71––70––69––68––16
-// |                                                           |
-// 46                                                          17
-// |                                                           |
-// 45                                                          18
-// |                                                           |
-// 44                                                          19
-// |                             BLUE                          |
-// 43                          75                              20
-// |                           |                               |
-// 42                          74                              21
-// |                           |                               |
-// 41                          73                              22
-// |                           |                               |
-// 40                          72                              23
-// |                           |                               |
-// 39––38––37––36––35––34––33––32––31––30––29––28––27––26––25––24
+/// Pro Spieler werden 16 Felder ausgehend vom Start bis zum nächsten Startfeld kalkuliert
+/// Die Ringgröße entscheidet über die Position der HOUSE_TILES, statt sie fest als Konstante zu schreiben.
+
+
 use super::piece::Piece;
 
 pub type Point = usize; // 0–79
@@ -77,7 +46,12 @@ impl Board {
 
     pub fn distance_between(&self, from: usize, to: usize, player_index: usize) -> Option<u8> {
         let ring_size = self.ring_size;
+        let num_players = ring_size / 16;
         let total_tiles = self.tiles.len();
+
+        if player_index >= num_players {
+            return None;
+        }
 
         // Check for out-of-bounds positions
         if from >= total_tiles || to >= total_tiles {
@@ -121,6 +95,12 @@ impl Board {
 
     pub fn passed_tiles(&self, from: usize, to: usize, player_index: usize, backward: bool) -> Option<Vec<Point>> {
         let ring_size = self.ring_size;
+        let num_players = ring_size / 16;
+
+        if player_index >= num_players {
+            return None;
+        }
+
         let total_tiles = self.tiles.len();
         let mut passed_tiles = Vec::new();
         let mut current_position = from;
@@ -194,6 +174,60 @@ impl Board {
 #[cfg(test)]
 mod tests {
     use super::*;
+    mod board_tests {
+        use super::*;
+
+        #[test]
+        fn board_sizes_for_2_to_6_players() {
+            for players in 2..=6 {
+                let board = Board::new(players);
+
+                assert_eq!(board.ring_size, players * 16);
+                assert_eq!(
+                    board.tiles.len(),
+                    players * 16 + players * HOUSE_SIZE
+                );
+            }
+        }
+
+        #[test]
+        fn start_and_house_fields_do_not_overlap() {
+            for players in 2..=6 {
+                let board = Board::new(players);
+
+                for p in 0..players {
+                    let start = board.start_field(p);
+                    assert!(start < board.ring_size);
+
+                    let house = board.house_by_player(p);
+                    for h in house {
+                        assert!(h >= board.ring_size);
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn ring_wrap_works_for_all_player_counts() {
+            for players in 2..=6 {
+                let board = Board::new(players);
+                let last = board.ring_size - 1;
+
+                assert_eq!(
+                    board.distance_between(last, 0, 0),
+                    Some(1)
+                );
+            }
+        }
+
+        #[test]
+        fn invalid_player_index_returns_none() {
+            let board = Board::new(4);
+
+            assert_eq!(board.distance_between(0, 1, 4), None);
+            assert_eq!(board.passed_tiles(0, 1, 4, false), None);
+        }
+    }
 
     mod distance_between_tests {
         use super::*;
@@ -236,6 +270,36 @@ mod tests {
             assert_eq!(board.distance_between(0, 80, 0), None);
             assert_eq!(board.distance_between(81, 90, 2), None);
         }
+
+        #[test]
+        fn every_player_can_enter_own_house() {
+            for players in 2..=6 {
+                let board = Board::new(players);
+
+                for p in 0..players {
+                    let from = (board.start_field(p) + board.ring_size - 2) % board.ring_size;
+                    let to = board.house_gateway(p);
+
+                    assert!(board.distance_between(from, to, p).is_some());
+                }
+            }
+        }
+
+        #[test]
+        fn house_entry_only_via_own_start_field() {
+            let board = Board::new(4);
+
+            for p in 0..4 {
+                let wrong_from = (board.start_field(p) + 1) % board.ring_size;
+                let to = board.house_gateway(p);
+
+                assert_eq!(
+                    board.distance_between(wrong_from, to, p),
+                    Some(board.ring_size as u8)
+                );
+            }
+        }
+
     }
     
     mod passed_tiles_tests {
@@ -267,6 +331,14 @@ mod tests {
                 board.passed_tiles(2, 62, 0, true),
                 Some(vec![1, 0, 63, 62])
             );
+        }
+
+        #[test]
+        fn zero_distance_move() {
+            let board = Board::new(4);
+
+            assert_eq!(board.distance_between(5, 5, 0), Some(0));
+            assert_eq!(board.passed_tiles(5, 5, 0, false), Some(vec![]));
         }
 
         #[test]
@@ -318,6 +390,67 @@ mod tests {
             assert_eq!(board.passed_tiles(80, 0, 0, false), None);
             assert_eq!(board.passed_tiles(0, 80, 0, false), None);
             assert_eq!(board.passed_tiles(81, 90, 2, false), None);
+        }
+
+        #[test]
+        fn distance_matches_passed_tiles_length() {
+            for players in 2..=6 {
+                let board = Board::new(players);
+
+                for p in 0..players {
+                    let from = board.start_field(p);
+                    let to = (from + 5) % board.ring_size;
+
+                    let dist = board.distance_between(from, to, p).unwrap();
+                    let passed = board.passed_tiles(from, to, p, false).unwrap();
+
+                    assert_eq!(passed.len(), dist as usize);
+                }
+            }
+        }
+
+        #[test]
+        fn passed_tiles_always_end_on_target() {
+            let board = Board::new(4);
+
+            let cases = [
+                (0, 5, 0, false),
+                (5, 0, 0, true),
+                (62, 64, 0, false),
+            ];
+
+            for (from, to, p, backward) in cases {
+                let passed = board.passed_tiles(from, to, p, backward).unwrap();
+                assert_eq!(passed.last(), Some(&to));
+            }
+        }
+
+        #[test]
+        fn cannot_pass_through_foreign_house_tiles() {
+            let board = Board::new(4);
+
+            let from = 15;
+            let to = 20;
+
+            let passed = board.passed_tiles(from, to, 0, false).unwrap();
+
+            for tile in passed {
+                assert!(tile < board.ring_size);
+            }
+        }
+
+        #[test]
+        fn backward_is_inverse_of_forward_on_ring() {
+            let board = Board::new(4);
+
+            let from = 10;
+            let to = 25;
+
+            let forward = board.passed_tiles(from, to - 1, 0, false).unwrap();
+            let backward = board.passed_tiles(to, from + 1, 0, true).unwrap();
+
+            let reversed: Vec<_> = backward.into_iter().rev().collect();
+            assert_eq!(forward, reversed);
         }
     }
 }
