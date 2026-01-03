@@ -42,6 +42,8 @@ impl FromStr for Action {
             "G" => Color::Green,
             "B" => Color::Blue,
             "Y" => Color::Yellow,
+            "P" => Color::Purple,
+            "O" => Color::Orange,
             _ => return Err("Invalid player"),
         };
 

@@ -150,7 +150,7 @@ impl Game {
     }
 
     fn new_free_for_all(n: usize) -> Self {
-        assert!(n >=2 && n <= 6, "Free-for-All can be played with 2 to 6 players.");
+        assert!(n >=2 && n <= 6, "Free-for-All can only be played with 2 to 6 players.");
 
         let colors = [Color::Red, Color::Green, Color::Blue, Color::Yellow, Color::Purple, Color::Orange];
 
@@ -163,7 +163,7 @@ impl Game {
             history: Vec::new(),
             round: 1,
 
-            trading_phase: true,
+            trading_phase: false,
             trade_buffer: Vec::new(),
 
             deck: Deck::new(),
@@ -1050,7 +1050,7 @@ impl DogGame for Game {
             }
         }
 
-        self.trading_phase = true;
+            self.trading_phase = true;
 
         // Starting player rotates by round
         self.current_player_index = (self.round - 1) % self.players.len();
@@ -1508,7 +1508,6 @@ mod tests {
 
             assert!(game.action(Card::Two, action).is_err());
 
-            // 
             assert_eq!(game.board.tiles, board_before);
             assert_eq!(game.discard, discard_before);
             assert_eq!(game.history.len(), history_len_before);
@@ -2480,7 +2479,7 @@ mod tests {
                     let mut game = setup_game(variant);
                     let player_index = 0;
 
-                    // Partner existiert nur bei Team-Varianten
+                    // partner only exists in team games
                     if let Some(teammate_index) = game.teammate_index(player_index) {
                         game.players[player_index].pieces_in_house = 4;
                         game.players[player_index].cards = vec![Card::Five];
@@ -2509,7 +2508,6 @@ mod tests {
                 game.players[0].cards = vec![Card::Two];
                 game.players[2].cards = vec![Card::Two];
 
-                // Partner-Figur kurz vor Haus
                 game.board.tiles[63] = Some(Piece {
                     owner: 0,
                     left_start: true,
@@ -3303,6 +3301,27 @@ mod tests {
                 }
 
                 #[test]
+                fn undo_place_restores_left_start_flag() {
+                    let mut game = Game::new(GameVariant::TwoVsTwo);
+                    game.trading_phase = false;
+                    game.players[0].cards = vec![Card::Ace];
+
+                    let start = game.board.start_field(0) as usize;
+
+                    let action = Action {
+                        player: Color::Red,
+                        action: ActionKind::Place { target_player: 0 },
+                        card: Card::Ace,
+                    };
+
+                    assert!(game.action(Card::Ace, action).is_ok());
+                    assert_eq!(game.board.tiles[start].as_ref().unwrap().left_start, false);
+
+                    assert!(game.undo_action().is_ok());
+                    assert!(game.board.tiles[start].is_none());
+                }
+
+                #[test]
                 fn invalid_place_creates_no_history_entry() {
                     let mut game = Game::new(GameVariant::TwoVsTwo);
                     game.trading_phase = false;
@@ -3318,6 +3337,25 @@ mod tests {
 
                     assert!(game.action(Card::Ace, action).is_err());
                     assert_eq!(game.history.len(), history_len);
+                }
+
+                #[test]
+                fn undo_place_removes_card_from_discard() {
+                    let mut game = Game::new(GameVariant::TwoVsTwo);
+                    game.trading_phase = false;
+                    game.players[0].cards = vec![Card::Ace, Card::Two];
+
+                    let action = Action {
+                        player: Color::Red,
+                        action: ActionKind::Place { target_player: 0 },
+                        card: Card::Ace,
+                    };
+
+                    assert!(game.action(Card::Ace, action).is_ok());
+                    assert!(game.discard.contains(&Card::Ace));
+
+                    assert!(game.undo_action().is_ok());
+                    assert!(!game.discard.contains(&Card::Ace));
                 }
 
                 #[test]
@@ -3374,6 +3412,54 @@ mod tests {
                     assert_eq!(game.board.tiles[0].as_ref().unwrap().owner, 1);
                     assert_eq!(game.players[0].pieces_to_place, 4);
                     assert!(game.players[0].cards.contains(&Card::Ace));
+                }
+
+                #[test]
+                fn undo_place_3v3() {
+                    let mut game = Game::new(GameVariant::ThreeVsThree);
+                    game.trading_phase = false;
+                    game.current_player_index = 4;
+
+                    game.players[4].cards = vec![Card::Ace, Card::Two];
+
+                    let start = game.board.start_field(4);
+
+                    let action = Action {
+                        player: game.players[4].color,
+                        action: ActionKind::Place { target_player: 4 },
+                        card: Card::Ace,
+                    };
+
+                    assert!(game.action(Card::Ace, action).is_ok());
+                    assert!(game.undo_action().is_ok());
+
+                    assert!(game.board.tiles[start].is_none());
+                    assert!(game.players[4].cards.contains(&Card::Ace));
+                }
+
+                #[test]
+                fn undo_place_3v3_partner_piece() {
+                    let mut game = Game::new(GameVariant::ThreeVsThree);
+                    game.trading_phase = false;
+                    game.current_player_index = 4;
+
+                    game.players[4].cards = vec![Card::Ace, Card::Two];
+                    game.players[4].pieces_in_house = 4;
+
+                    let start = game.board.start_field(2);
+
+                    let action = Action {
+                        player: game.players[4].color,
+                        action: ActionKind::Place { target_player: 2 },
+                        card: Card::Ace,
+                    };
+
+                    assert!(game.action(Card::Ace, action).is_ok());
+                    assert_eq!(game.board.tiles[start].unwrap().owner, 2);
+                    
+                    assert!(game.undo_action().is_ok());
+                    assert!(game.board.tiles[start].is_none());
+                    assert!(game.players[4].cards.contains(&Card::Ace));
                 }
             }
         

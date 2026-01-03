@@ -33,7 +33,7 @@ fn draw_board(game: &Game) {
     println!();
 }
 
-/// Zeichnet ein Segment (Ring + Haus) für einen Spieler
+/// Draws a segment of the board for a player
 fn draw_segment(
     game: &Game,
     board: &[Option<Piece>],
@@ -42,10 +42,11 @@ fn draw_segment(
     house: &[usize],
 ) {
     let label = format!("{:?} ({})", game.players[player_index].color, player_index);
+    
 
     print!("{:<15}: Track: ", label);
 
-    // 16 Felder Ring für diesen Spieler
+    // 16 tiles per player segment
     for i in 0..16 {
         let idx = (start + i) % board.len();
         print!("{} ", cell_char(game, board, idx));
@@ -59,7 +60,7 @@ fn draw_segment(
     println!();
 }
 
-/// Gibt das Zeichen für ein Feld zurück
+/// Returns the character representation of a cell
 fn cell_char(game: &Game, board: &[Option<Piece>], idx: usize) -> char {
     match &board[idx] {
         Some(piece) => {
