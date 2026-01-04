@@ -170,6 +170,51 @@ impl Board {
 
         Some(passed_tiles)
     }
+
+    pub fn is_path_free(&self, path: &[usize]) -> bool {
+        for &tile in path {
+            if let Some(p) = &self.tiles[tile] {
+                if tile >= self.ring_size { return false; }
+                if !p.left_start { return false;}
+            }
+        }
+
+        true
+    }
+
+    pub fn next_free_tiles(&self, from: usize, controllable_indices: &[usize]) -> Vec<usize> {
+        let mut options = Vec::new();
+
+        // Check if tile is occupied
+        let piece = match &self.tiles[from] {
+            Some(p) => p,
+            None => return options,
+        };
+
+        if !controllable_indices.contains(&piece.owner) {
+            return options;
+        };
+
+        let next_ring = (from + 1) % self.ring_size;
+        
+        match &self.tiles[next_ring] {
+            None => options.push(next_ring),
+            Some(p) if p.left_start => options.push(next_ring),
+            _ => {},
+        }
+
+        for &player_index in controllable_indices {
+            if self.start_field(player_index) == from && piece.left_start{
+                for house_index in self.house_by_player(player_index) {
+                    match &self.tiles[house_index] {
+                        None => options.push(house_index),
+                        Some(_) => {},
+                    }
+                }
+            }
+        }
+        options
+    }
 }
 
 #[cfg(test)]

@@ -258,6 +258,13 @@ impl Game {
         }
     }
 
+    fn controllable_player_indices(&self, player_index: usize) -> Vec<usize> {
+        let mut indices = vec![player_index];
+        indices.extend(self.teammate_indices(player_index));
+        indices
+    }
+
+
     pub fn teammate_index(&self, player_index: usize) -> Option<usize> {
         if let Some(teams) = &self.teams {
             for team in teams {
@@ -270,7 +277,6 @@ impl Game {
         None
     }
     
-
     pub fn can_control_piece(&self, actor_index: usize, piece_owner_index: usize) -> bool {
         
         // Own piece
@@ -310,6 +316,183 @@ impl Game {
             team.contains(&placer) && team.contains(&target)
         })
     }
+
+    fn check_if_any_move_possible(&self) -> bool{
+        let current_player = self.player_by_index(self.current_player_index);
+
+        for card in &current_player.cards {
+            if self.is_card_playable(*card) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn is_card_playable(&self, card: Card) -> bool {
+        let current_player_index = self.current_player_index;
+        let controllable_player_indices = self.controllable_player_indices(current_player_index);
+
+        // Check if place is possible
+        if matches!(card, Card::Ace | Card::King | Card::Joker) {
+            for &player_index in &controllable_player_indices {
+                if self.players[player_index].pieces_to_place == 0 {
+                    continue;
+                }
+
+                let start = self.board.start_field(player_index);
+
+                match &self.board.tiles[start] {
+                    None => return true,
+                    Some(piece) => {
+                        if piece.left_start {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        let movable_pieces = self.find_movable_pieces(current_player_index);
+
+        if movable_pieces.is_empty() {
+            return false;
+        }
+
+        // Check if interchange is possible
+        if matches!(card, Card::Jack | Card::Joker) {
+            let interchangeable_pieces = self.count_interchangeable_pieces();
+
+            if !movable_pieces.is_empty() && interchangeable_pieces >= 2 {
+                return true;
+            }
+        }
+
+        // Check if split is possible
+        if matches!(card, Card::Seven | Card::Joker) {
+            return self.is_seven_playable(current_player_index);
+        }
+
+        // Check if normal move is possible
+        let distances = card.possible_distances().unwrap_or_default();
+
+        for &from in &movable_pieces {
+            for &dist in &distances {
+                let backward =
+                    matches!(card, Card::Four | Card::Joker) && dist == 4;
+
+                if self.can_piece_move_distance(from, dist, backward) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn find_movable_pieces(&self, player_index: usize) -> Vec<usize> {
+        let controllable_player_indices = self.controllable_player_indices(player_index);
+        let mut positions = Vec::new();
+
+        for (idx, tile) in self.board.tiles.iter().enumerate() {
+            if let Some(piece) = tile {
+                if controllable_player_indices.contains(&piece.owner)
+                    && self.can_control_piece(player_index, piece.owner)
+                {
+                    positions.push(idx);
+                }
+            }
+        }
+
+        positions
+    }
+
+    fn count_interchangeable_pieces(&self) -> usize {
+        self.board
+            .tiles
+            .iter()
+            .enumerate()
+            .filter(|(idx, tile)| {
+                *idx < 64 &&
+                tile.as_ref().map_or(false, |p| p.left_start)
+            })
+            .count()
+    }
+
+    fn is_seven_playable(&self, player_index: usize) -> bool {
+        let controllable_indices = self.controllable_player_indices(player_index);
+        let pieces = self.find_movable_pieces(player_index);
+
+        fn try_split(
+            game: &Game,
+            remaining: u8,
+            pieces_positions: &[usize],
+            controllable_indices: &[usize],
+            occupied: &mut Vec<usize>,
+        ) -> bool {
+            if remaining == 0 {
+                return true;
+            }
+            if pieces_positions.is_empty() {
+                return false;
+            }
+
+            for (i, &from) in pieces_positions.iter().enumerate() {
+                // Calculate legal moves 
+                let next_tiles = game.board.next_free_tiles(from, controllable_indices)
+                    .into_iter()
+                    .filter(|tile| !occupied.contains(tile)) // virutal move
+                    .collect::<Vec<_>>();
+
+                for next in next_tiles {
+                    occupied.push(next);
+
+                    // Recursion: check remaining steps on other pieces 
+                    let mut new_pieces = pieces_positions.to_vec();
+                    new_pieces[i] = next; // aktuelle Figur virtuell bewegt
+                    if try_split(game, remaining - 1, &new_pieces, controllable_indices, occupied) {
+                        return true;
+                    }
+
+                    occupied.pop();
+                }
+            }
+
+            false
+        }
+
+        try_split(self, 7, &pieces, &controllable_indices, &mut Vec::new())
+    }
+
+
+    fn can_piece_move_distance(&self, from: usize, dist: u8, backward: bool) -> bool {
+        let piece = self.board.tiles[from].as_ref().unwrap();
+
+        for to in 0..self.board.tiles.len() {
+            let valid = if backward {
+                self.board.distance_between(to, from, piece.owner) == Some(dist)
+            } else {
+                self.board.distance_between(from, to, piece.owner) == Some(dist)
+            };
+
+            if !valid {
+                continue;
+            }
+
+            if let Some(path) =
+                self.board.passed_tiles(from, to,  piece.owner, backward)
+            {
+                if self.board.is_path_free(&path) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+
+
 }
 
 pub trait DogGame {
@@ -1462,6 +1645,263 @@ mod tests {
                 assert!(game.play(input).is_err());
                 assert_eq!(game.split_rest, None);
             }
+        }
+    
+        mod check_any_move_possible_tests {
+            use super::*;
+
+            #[test]
+            fn no_cards_no_move_possible() {
+                let mut game = Game::new(GameVariant::TwoVsTwo);
+                game.trading_phase = false;
+
+                game.players[0].cards.clear();
+
+                assert!(!game.check_if_any_move_possible());
+            }
+
+            #[test]
+            fn cards_but_no_pieces_no_move_possible() {
+                let mut game = Game::new(GameVariant::TwoVsTwo);
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Five];
+                game.players[0].pieces_to_place = 0;
+
+                assert!(!game.check_if_any_move_possible());
+            }
+
+            #[test]
+            fn place_possible_on_empty_start() {
+                let mut game = Game::new(GameVariant::TwoVsTwo);
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Ace];
+                game.players[0].pieces_to_place = 4;
+
+                assert!(game.check_if_any_move_possible());
+            }
+
+            #[test]
+            fn place_possible_by_beating_opponent() {
+                let mut game = Game::new(GameVariant::TwoVsTwo);
+                game.trading_phase = false;
+
+                let start = game.board.start_field(0) as usize;
+                game.board.tiles[start] = Some(Piece {
+                    owner: 1,
+                    left_start: true,
+                });
+
+                game.players[0].cards = vec![Card::Ace];
+                game.players[0].pieces_to_place = 4;
+
+                assert!(game.check_if_any_move_possible());
+            }
+
+            #[test]
+            fn place_partner_piece_possible() {
+                let mut game = Game::new_3v3();
+                game.trading_phase = false;
+
+                game.players[0].pieces_in_house = 4;
+                game.players[0].cards = vec![Card::Ace];
+
+                assert!(game.check_if_any_move_possible());
+            }
+
+            #[test]
+            fn normal_move_possible() {
+                let mut game = Game::new(GameVariant::TwoVsTwo);
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Five];
+
+                game.board.tiles[0] = Some(Piece {
+                    owner: 0,
+                    left_start: true,
+                });
+
+                assert!(game.check_if_any_move_possible());
+            }
+
+            #[test]
+            fn move_blocked_no_move_possible() {
+                let mut game = Game::new(GameVariant::TwoVsTwo);
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Five];
+
+                game.board.tiles[0] = Some(Piece {
+                    owner: 0,
+                    left_start: true,
+                });
+
+                game.board.tiles[3] = Some(Piece {
+                    owner: 1,
+                    left_start: false,
+                });
+
+                assert!(!game.check_if_any_move_possible());
+            }
+
+            #[test]
+            fn seven_split_possible() {
+                let mut game = Game::new(GameVariant::TwoVsTwo);
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Seven];
+
+                game.board.tiles[0] = Some(Piece {
+                    owner: 0,
+                    left_start: true,
+                });
+
+                assert!(game.check_if_any_move_possible());
+            }
+
+            #[test]
+            fn seven_but_no_split_possible() {
+                let mut game = Game::new(GameVariant::TwoVsTwo);
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Seven];
+                game.players[0].pieces_to_place = 0;
+
+                // no pieces on board
+
+                assert!(!game.check_if_any_move_possible());
+            }
+
+            #[test]
+            fn seven_split_blocked() {
+                let mut game = Game::new_2v2();
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Seven];
+
+                game.board.tiles[0] = Some(Piece {
+                    owner: 0,
+                    left_start: false,
+                });
+
+                game.board.tiles[1] = Some(Piece {
+                        owner: 1,
+                        left_start: false,
+                });
+
+                assert!(!game.check_if_any_move_possible());                
+            }
+
+            #[test]
+            fn seven_split_separate_moves_not_possible() {
+                let mut game = Game::new_2v2();
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Seven];
+
+                game.board.tiles[0] = Some(Piece {
+                    owner: 0,
+                    left_start: false,
+                });
+
+                game.board.tiles[4] = Some(Piece {
+                        owner: 1,
+                        left_start: false,
+                });
+
+                game.board.tiles[5] = Some(Piece {
+                    owner: 0,
+                    left_start: false,
+                });
+
+                game.board.tiles[9] = Some(Piece {
+                        owner: 1,
+                        left_start: false,
+                });
+
+                assert!(!game.check_if_any_move_possible());
+            }
+
+            #[test]
+            fn seven_split_single_moves_nealry_all_blocked() {
+                let mut game = Game::new_2v2();
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Seven];
+
+                for position in 0..6 {
+                    game.board.tiles [3 * position] = Some(Piece { 
+                        owner: (2 * position) % 4, 
+                        left_start: false 
+                    });
+
+                    game.board.tiles[3 * position + 2] = Some(Piece { 
+                        owner: 1, 
+                        left_start: true 
+                    });
+                }
+
+                assert!(!game.check_if_any_move_possible());
+
+                game.board.tiles[18] = Some(Piece { 
+                    owner: 0, 
+                    left_start: false 
+                });
+
+                game.board.tiles[20] = Some(Piece { 
+                    owner: 1, 
+                    left_start: false 
+                });
+
+                assert!(game.check_if_any_move_possible());
+            }
+
+            #[test]
+            fn jack_swap_possible() {
+                let mut game = Game::new(GameVariant::TwoVsTwo);
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Jack];
+
+                game.board.tiles[0] = Some(Piece { owner: 0, left_start: true });
+                game.board.tiles[5] = Some(Piece { owner: 1, left_start: true });
+
+                assert!(game.check_if_any_move_possible());
+            }
+
+            #[test]
+            fn jack_but_no_swap_possible() {
+                let mut game = Game::new(GameVariant::TwoVsTwo);
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Jack];
+
+                game.board.tiles[0] = Some(Piece {
+                    owner: 0,
+                    left_start: false,
+                });
+
+                assert!(!game.check_if_any_move_possible());
+            }
+
+            #[test]
+            fn team_piece_move_possible_in_3v3() {
+                let mut game = Game::new(GameVariant::ThreeVsThree);
+                game.trading_phase = false;
+
+                game.players[0].pieces_in_house = 4;
+                game.players[0].cards = vec![Card::Five];
+
+                game.board.tiles[15] = Some(Piece {
+                    owner: 4,
+                    left_start: true,
+                });
+
+                assert!(game.check_if_any_move_possible());
+            }
+
+
         }
     }
     mod action_tests {

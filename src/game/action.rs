@@ -19,6 +19,7 @@ pub enum ActionKind {
     Split { from: Point, to: Point },
     Trade,
     Remove,
+    // Choose { target_card: Card, target_player: usize }
 }
 
 impl FromStr for Action {
@@ -30,6 +31,7 @@ impl FromStr for Action {
     /// "B 11 I 40 45" - Blue interchangees between 40 and 45 with Jack (= 11)
     /// "Y 0 T" - Yellow wants so trade his/her Joker with Green
     /// "R 7 R" - Red removes 7 from his hand
+    /// todo! "O 2 C " - Orange chooses the 2nd card from opponent's hand (Purple)
     
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split_whitespace().collect();

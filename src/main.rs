@@ -25,7 +25,7 @@ fn select_game_variant() -> GameVariant {
             "3" => return GameVariant::TwoVsTwoVsTwo,
             "4" => {
                 loop {
-                    println!("Spieleranzahl auswählen:");
+                    println!("Spieleranzahl auswählen (2-6):");
                     print!("Eingabe: ");
                     io::stdout().flush().unwrap();
 
