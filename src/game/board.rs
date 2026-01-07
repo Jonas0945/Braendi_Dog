@@ -215,6 +215,110 @@ impl Board {
         }
         options
     }
+
+    pub fn max_path_from(&self, from: usize, controllable_indices: &[usize]) -> u8 {
+        let piece = match &self.tiles[from] {
+            Some(p) => p,
+            None => return 0,
+        };
+
+        if !controllable_indices.contains(&piece.owner) {
+            return 0;
+        };
+
+        let mut max_steps = 0;
+
+        // House-only path
+        if from >= self.ring_size {
+            let player_house = self.house_by_player(piece.owner);
+            let mut steps = 0;
+            let mut index = from;
+
+            loop {
+                let next = index + 1;
+                if !player_house.contains(&next) {
+                    break;
+                }
+
+                match &self.tiles[next] {
+                    None => {
+                        steps += 1;
+                        index = next;
+                    }
+                    Some(_) => break,
+                }
+            }
+
+            max_steps = steps;
+        }
+
+        // Ring-only path
+        if from < self.ring_size {
+            let mut steps = 0;
+            let mut index = from;
+
+            loop {
+                let next = (index + 1) % self.ring_size;
+
+                if next == from {
+                    break;
+                }
+
+                match &self.tiles[next] {
+                    None => {
+                        steps += 1;
+                        index = next;
+                    }
+                    Some(p) if p.left_start => {
+                        steps += 1;
+                        index = next;
+                    }
+                    _ => break,
+                }
+            }
+
+            max_steps = max_steps.max(steps);
+        }
+
+        // Ring + house path
+        if from < self.ring_size {
+            let mut ring_steps = 0;
+            let mut index = from;
+            let mut reached_start = from == self.start_field(piece.owner);
+
+            let can_enter_house = !(reached_start && !piece.left_start);
+
+            while can_enter_house {
+                if reached_start {
+                    let mut house_steps = 0;
+                    for &house_index in &self.house_by_player(piece.owner) {
+                        match &self.tiles[house_index] {
+                            None => house_steps += 1,
+                            Some(_) => break,
+                        }
+                    }
+
+                    max_steps = max_steps.max(ring_steps + house_steps);
+                    break;
+                }
+
+                let next = (index + 1) % self.ring_size;
+                match &self.tiles[next] {
+                    None => ring_steps += 1,
+                    Some(p) if p.left_start => ring_steps += 1,
+                    _ => break,
+                }
+
+                if next == self.start_field(piece.owner) {
+                    reached_start = true;
+                }
+
+                index = next;
+            }
+        }
+
+        max_steps
+    }
 }
 
 #[cfg(test)]
@@ -272,6 +376,157 @@ mod tests {
 
             assert_eq!(board.distance_between(0, 1, 4), None);
             assert_eq!(board.passed_tiles(0, 1, 4, false), None);
+        }
+    }
+
+    mod max_path_tests {
+        use super::*;
+
+        #[test]
+        fn max_path_house_only_simple() {
+            let mut board = Board::new(4);
+
+            board.tiles[65] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
+
+            board.tiles[66] = None;
+            board.tiles[67] = Some(Piece {
+                owner: 1,
+                left_start: false,
+            });
+
+            let max = board.max_path_from(65, &[0, 2]);
+            assert_eq!(max, 1);
+        }
+
+        #[test]
+        fn max_path_ring_only() {
+            let mut board = Board::new(4);
+
+            board.tiles[10] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
+
+            board.tiles[11] = None;
+            board.tiles[12] = None;
+            board.tiles[13] = Some(Piece {
+                owner: 1,
+                left_start: false,
+            });
+
+            let steps = board.max_path_from(10, &[0, 2]);
+            assert_eq!(steps, 2);
+        }
+
+        #[test]
+        fn max_path_from_start_field_prefers_house() {
+            let mut board = Board::new(4);
+
+            board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+
+            // Ring only 1 step
+            board.tiles[1] = None;
+            board.tiles[2] = Some(Piece {
+                owner: 1,
+                left_start: false,
+            });
+
+            // House has 2 steps
+            board.tiles[64] = None;
+            board.tiles[65] = None;
+            board.tiles[66] = Some(Piece {
+                owner: 1,
+                left_start: false,
+            });
+
+            let steps = board.max_path_from(0, &[0, 2]);
+            assert_eq!(steps, 2);
+        }
+
+        #[test]
+        fn max_path_ring_to_house() {
+            let mut board = Board::new(4);
+
+            board.tiles[63] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
+
+            // Ring blocked
+            board.tiles[1] = Some(Piece {
+                owner: 1,
+                left_start: false,
+            });
+
+            // House free
+            board.tiles[64] = None;
+            board.tiles[65] = None;
+            board.tiles[66] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
+
+            let steps = board.max_path_from(63, &[0, 2]);
+            assert_eq!(steps, 3); // 63 → 0 + 2 house
+        }
+
+        #[test]
+        fn max_path_not_controllable_piece() {
+            let mut board = Board::new(4);
+
+            board.tiles[10] = Some(Piece {
+                owner: 1,
+                left_start: false,
+            });
+
+            let steps = board.max_path_from(10, &[0, 2]);
+            assert_eq!(steps, 0);
+        }
+
+        #[test]
+        fn max_path_only_ring_allowed() {
+            let mut board = Board::new(4);
+
+            board.tiles[0] = Some(Piece { 
+                owner: 0, left_start: false 
+            });
+
+            board.tiles[66] = Some(Piece { 
+                owner: 0, 
+                left_start: true 
+            });
+
+            board.tiles[2] = Some(Piece { 
+                owner: 1, 
+                left_start: false 
+            });
+
+            let steps = board.max_path_from(0, &[0,2]);
+            assert_eq!(steps, 1);
+        }
+
+        #[test]
+        fn max_path_teammate_piece() {
+            let mut board = Board::new(4);
+
+            board.tiles[4] = Some(Piece { 
+                owner: 2, 
+                left_start: true 
+            });
+
+            board.tiles[8] = Some(Piece { 
+                owner: 1, 
+                left_start: false 
+            });
+
+            let steps = board.max_path_from(4, &[0,2]);
+            assert_eq!(steps, 3);
         }
     }
 
