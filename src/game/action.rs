@@ -13,12 +13,13 @@ pub struct Action {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ActionKind {
-    Place,
-    Move(Point, Point),
-    Interchange(Point, Point),
-    Split(Point, Point),
+    Place { target_player: usize },
+    Move { from: Point, to: Point },
+    Interchange { a: Point, b: Point },
+    Split { from: Point, to: Point },
     Trade,
     Remove,
+    // Choose { target_card: Card, target_player: usize }
 }
 
 impl FromStr for Action {
@@ -30,6 +31,7 @@ impl FromStr for Action {
     /// "B 11 I 40 45" - Blue interchangees between 40 and 45 with Jack (= 11)
     /// "Y 0 T" - Yellow wants so trade his/her Joker with Green
     /// "R 7 R" - Red removes 7 from his hand
+    /// todo! "O 2 C " - Orange chooses the 2nd card from opponent's hand (Purple)
     
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split_whitespace().collect();
@@ -42,6 +44,8 @@ impl FromStr for Action {
             "G" => Color::Green,
             "B" => Color::Blue,
             "Y" => Color::Yellow,
+            "P" => Color::Purple,
+            "O" => Color::Orange,
             _ => return Err("Invalid player"),
         };
 
@@ -65,11 +69,13 @@ impl FromStr for Action {
 
         let action = match parts[2] {
             "P" => {
-                if parts.len() != 3 {
+                if parts.len() != 4 {
                     return Err("Invalid place format");
                 }
+
+                let target_player: Point = parts[3].parse().map_err(|_| "Invalid to point")?; 
                 
-                ActionKind::Place
+                ActionKind::Place { target_player }
             }
             "M" => {
                 if parts.len() != 5 {
@@ -79,17 +85,17 @@ impl FromStr for Action {
                 let from: Point = parts[3].parse().map_err(|_| "Invalid from point")?;
                 let to: Point = parts[4].parse().map_err(|_| "Invalid to point")?;
                 
-                ActionKind::Move(from, to)
+                ActionKind::Move { from, to }
             }
             "I" => {
                 if parts.len() != 5 {
                     return Err("Invalid interchange format");
                 }
 
-                let from: Point = parts[3].parse().map_err(|_| "Invalid from point")?;
-                let to: Point = parts[4].parse().map_err(|_| "Invalid to point")?;
+                let a: Point = parts[3].parse().map_err(|_| "Invalid from point")?;
+                let b: Point = parts[4].parse().map_err(|_| "Invalid to point")?;
 
-                ActionKind::Interchange(from, to)
+                ActionKind::Interchange { a, b }
             }
 
             "T" => {
@@ -108,7 +114,7 @@ impl FromStr for Action {
                 let from: Point = parts[3].parse().map_err(|_| "Invalid from point")?;
                 let to: Point = parts[4].parse().map_err(|_| "Invalid to point")?;
 
-                ActionKind::Split(from, to)
+                ActionKind::Split { from, to }
             }
 
             "R" => {
@@ -132,6 +138,8 @@ impl Display for Action {
             Color::Green => "G",
             Color::Blue => "B",
             Color::Yellow => "Y",
+            Color::Purple => "P",
+            Color::Orange => "O",
         };
 
         let card_str = match self.card {
@@ -152,11 +160,11 @@ impl Display for Action {
         };
 
         let action_str = match self.action {
-            ActionKind::Place => format!("P"),
-            ActionKind::Move(from, to) => format!("M {from} {to}"),
-            ActionKind::Interchange(from, to) => format!("I {from} {to}"),
+            ActionKind::Place { target_player } => format!("P {target_player}"),
+            ActionKind::Move { from, to } => format!("M {from} {to}"),
+            ActionKind::Interchange { a, b } => format!("I {a} {b}"),
             ActionKind::Trade => format!("T"),
-            ActionKind::Split(from, to) => format!("S {from} {to}"),
+            ActionKind::Split { from, to } => format!("S {from} {to}"),
             ActionKind::Remove => format!("R"),
         };
 

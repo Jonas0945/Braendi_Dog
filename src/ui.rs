@@ -1,4 +1,6 @@
-use crate::game::{Game, DogGame, Color, Piece};
+use crate::game::{Game, Color, Piece};
+use crate::game::game::DogGame;
+
 
 pub fn render(game: &Game) {
     clear_screen();
@@ -20,43 +22,65 @@ fn print_header() {
 
 fn draw_board(game: &Game) {
     let board = game.board_state();
-
     println!("Board State:\n");
 
-    draw_segment("Red    (0–15)", board, 0..16, 64..68);
-    draw_segment("Green  (16–31)", board, 16..32, 68..72);
-    draw_segment("Blue   (32–47)", board, 32..48, 72..76);
-    draw_segment("Yellow (48–63)", board, 48..64, 76..80);
+    for (player_index, _player) in game.players.iter().enumerate() {
+        let start = game.board.start_field(player_index);
+        let house = game.board.house_by_player(player_index);
+        draw_segment(game, &board, player_index, start, &house);
+    }
 
     println!();
 }
 
-fn draw_segment(label: &str, board: &[Option<Piece>; 80], track_range: std::ops::Range<usize>, house_range: std::ops::Range<usize>) {
+/// Draws a segment of the board for a player
+fn draw_segment(
+    game: &Game,
+    board: &[Option<Piece>],
+    player_index: usize,
+    start: usize,
+    house: &[usize],
+) {
+    let label = format!("{:?} ({})", game.players[player_index].color, player_index);
+    
+
     print!("{:<15}: Track: ", label);
-    for i in track_range {
-        print!("{} ", cell_char(board, i));
+
+    // 16 tiles per player segment
+    for i in 0..16 {
+        let idx = (start + i) % board.len();
+        print!("{} ", cell_char(game, board, idx));
     }
+
     print!("| House: ");
-    for i in house_range {
-        print!("{} ", cell_char(board, i));
+    for &idx in house {
+        print!("{} ", cell_char(game, board, idx));
     }
+
     println!();
 }
 
-fn cell_char(board: &[Option<Piece>; 80], idx: usize) -> char {
+/// Returns the character representation of a cell
+fn cell_char(game: &Game, board: &[Option<Piece>], idx: usize) -> char {
     match &board[idx] {
-        Some(piece) => match piece.color {
-            Color::Red => 'R',
-            Color::Green => 'G',
-            Color::Blue => 'B',
-            Color::Yellow => 'Y',
-        },
+        Some(piece) => {
+            let color = game.players[piece.owner].color;
+            match color {
+                Color::Red => 'R',
+                Color::Green => 'G',
+                Color::Blue => 'B',
+                Color::Yellow => 'Y',
+                Color::Purple => 'P',
+                Color::Orange => 'O',
+            }
+        }
         None => '.',
     }
 }
 
 fn draw_current_player(game: &Game) {
     let p = game.current_player();
+    let player_index = game.index_of_color(p.color);
 
     println!("Aktiver Spieler: {:?}", p.color);
     println!(
@@ -73,14 +97,11 @@ fn draw_current_player(game: &Game) {
         .board_state()
         .iter()
         .enumerate()
-        .filter(|(_, tile)| {
-            tile.map_or(false, |piece| piece.color == p.color)
-        })
+        .filter(|(_, tile)| tile.as_ref().map_or(false, |piece| piece.owner == player_index))
         .map(|(idx, _)| idx)
         .collect();
 
     println!("Figurenpositionen: {:?}", positions);
-    
     println!();
 }
 
