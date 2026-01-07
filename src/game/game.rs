@@ -209,133 +209,6 @@ impl Game {
         self.action(card, action)
     }
 
-    fn check_if_any_move_possible(&self) -> bool{
-        let player = self.player_by_color(self.current_player_color);
-
-        for card in &player.cards {
-            if self.is_card_playable(*card) {
-                return true;
-            }
-        }
-        false
-    }
-    
-
-    fn is_card_playable(&self, card: Card) -> bool {
-        let color = self.current_player_color;
-
-        if matches!(card, Card::Ace | Card::King | Card::Joker) {
-            let start_field = Board::start_field(self.teammate_or_self(color)) as usize;
-            if self.player_by_color(self.teammate_or_self(color)).pieces_to_place > 0 {
-                if let Some(piece) = &self.board.tiles[start_field] {
-                    if piece.color != self.teammate_or_self(color) || piece.left_start {
-                        return true; 
-                    }
-                } else {
-                    return true; 
-                }
-            }
-        }
-
-        if matches!(card, Card::Jack | Card::Joker) {
-            let my_pieces = self.find_movable_pieces(color);
-            let all_pieces = self.count_interchangeable_pieces();
-            
-            if !my_pieces.is_empty() && all_pieces >= 2 {
-                return true;
-            }
-        }
-
-        let pieces = self.find_movable_pieces(color);
-        
-       
-        let distances = if card == Card::Seven {
-            vec![1, 2, 3, 4, 5, 6, 7] 
-        } else {
-            card.possible_distances().unwrap_or_default()
-        };
-
-        for &pos in &pieces {
-            for &dist in &distances {
-                let try_backward = (matches!(card, Card::Four | Card::Joker) && dist == 4) 
-                                    || (matches!(card, Card::Seven) && false); // 7 geht nur vorwärts
-
-                if self.can_piece_move_distance(pos, dist, try_backward) {
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
-    fn find_movable_pieces(&self, color: Color) -> Vec<usize> {
-        let mut positions = Vec::new();
-        let target_color = self.teammate_or_self(color); // Partner-Logik
-
-        for (idx, tile) in self.board.tiles.iter().enumerate() {
-            if let Some(piece) = tile {
-                if piece.color == target_color || (piece.color == color) {
-                    if self.player_by_color(color).can_control_piece(*piece) {
-                        positions.push(idx);
-                    }
-                }
-            }
-        }
-        positions
-    }
-
-    fn count_interchangeable_pieces(&self) -> usize {
-        self.board.tiles.iter().enumerate().filter(|(idx, tile)| {
-            if let Some(piece) = tile {
-                if *idx < 64 && piece.left_start {
-                    return true;
-                }
-            }
-            false
-        }).count()
-    }
-    
-    fn can_piece_move_distance(&self, from: usize, dist: u8, backward: bool) -> bool {
-        let piece = self.board.tiles[from].as_ref().unwrap();
-        
-        for to in 0..80 {
-            if !backward {
-                if self.board.distance_between(from as u8, to as u8, piece.color) == Some(dist) {
-                    if let Some(path) = self.board.passed_tiles(from as u8, to as u8, piece.color, false) {
-                        if self.is_path_free(&path) { return true; }
-                    }
-                }
-            } 
-            else {
-                if self.board.distance_between(to as u8, from as u8, piece.color) == Some(dist) {
-                    if let Some(path) = self.board.passed_tiles(from as u8, to as u8, piece.color, true) {
-                        if self.is_path_free(&path) { return true; }
-                    }
-                }
-            }
-        }
-        false
-    }
-
-    fn is_path_free(&self, path: &[u8]) -> bool {
-        for &tile in path {
-            if let Some(p) = &self.board.tiles[tile as usize] {
-                if tile >= 64 { return false; } 
-                if !p.left_start { return false; }
-            }
-        }
-        true
-    }
-
-    fn teammate_or_self(&self, color: Color) -> Color {
-        if self.player_by_color(color).pieces_in_house == 4 {
-            color.teammate()
-        } else {
-            color
-        }
-    }
-
     fn all_players_out_of_cards(&self) -> bool {
         self.players
             .iter()
@@ -649,7 +522,7 @@ impl DogGame for Game {
     fn action(&mut self, _card: Card, _action: Action) -> Result<(), &'static str> {
         
         if self.split_rest.is_some(){
-            if !matches!(_action.action, ActionKind::Split(_, _)) {
+            if !matches!(_action.action, ActionKind::Split { .. }) {
                 return Err("Cannot perform actions other than Split during splitting phase.");
             }
         }
@@ -1704,10 +1577,10 @@ mod tests {
                 let mut game = Game::new(GameVariant::TwoVsTwo);
                 game.trading_phase = false;
 
-                game.players[0].cards = vec![Card::Joker];
+                game.players[0].cards = vec![Card::Five];
                 game.players[1].cards = vec![Card::Ace];
 
-                assert!(game.play("R 0 R").is_ok());
+                assert!(game.play("R 5 R").is_ok());
                 assert!(game.players[0].cards.is_empty());
                 assert_eq!(game.current_player_index, 1);
             }
@@ -4498,21 +4371,21 @@ mod tests {
                     let mut game = Game::new(GameVariant::TwoVsTwo);
                     game.trading_phase = false;
 
-                    game.players[0].cards = vec![Card::Ace, Card::Five];
+                    game.players[0].cards = vec![Card::Two, Card::Five];
 
                     let action = Action {
                         player: Color::Red,
                         action: ActionKind::Remove,
-                        card: Card::Ace,
+                        card: Card::Two,
                     };
 
-                    assert!(game.action(Card::Ace, action).is_ok());
-                    assert!(!game.players[0].cards.contains(&Card::Ace));
-                    assert!(game.discard.contains(&Card::Ace));
+                    assert!(game.action(Card::Two, action).is_ok());
+                    assert!(!game.players[0].cards.contains(&Card::Two));
+                    assert!(game.discard.contains(&Card::Two));
 
                     assert!(game.undo_action().is_ok());
-                    assert!(game.players[0].cards.contains(&Card::Ace));
-                    assert!(!game.discard.contains(&Card::Ace));
+                    assert!(game.players[0].cards.contains(&Card::Two));
+                    assert!(!game.discard.contains(&Card::Two));
                 }
 
                 #[test]
@@ -4520,17 +4393,17 @@ mod tests {
                     let mut game = Game::new(GameVariant::TwoVsTwo);
                     game.trading_phase = false;
 
-                    game.players[0].cards = vec![Card::Ace, Card::Two];
+                    game.players[0].cards = vec![Card::Two, Card::Three];
 
                     let action = Action {
                         player: Color::Red,
                         action: ActionKind::Remove,
-                        card: Card::Ace,
+                        card: Card::Two,
                     };
 
                     let current_player = game.current_player_index;
 
-                    assert!(game.action(Card::Ace, action).is_ok());
+                    assert!(game.action(Card::Two, action).is_ok());
                     assert_ne!(game.current_player_index, current_player);
 
                     assert!(game.undo_action().is_ok());
