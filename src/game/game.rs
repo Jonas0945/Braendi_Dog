@@ -209,6 +209,133 @@ impl Game {
         self.action(card, action)
     }
 
+    fn check_if_any_move_possible(&self) -> bool{
+        let player = self.player_by_color(self.current_player_color);
+
+        for card in &player.cards {
+            if self.is_card_playable(*card) {
+                return true;
+            }
+        }
+        false
+    }
+    
+
+    fn is_card_playable(&self, card: Card) -> bool {
+        let color = self.current_player_color;
+
+        if matches!(card, Card::Ace | Card::King | Card::Joker) {
+            let start_field = Board::start_field(self.teammate_or_self(color)) as usize;
+            if self.player_by_color(self.teammate_or_self(color)).pieces_to_place > 0 {
+                if let Some(piece) = &self.board.tiles[start_field] {
+                    if piece.color != self.teammate_or_self(color) || piece.left_start {
+                        return true; 
+                    }
+                } else {
+                    return true; 
+                }
+            }
+        }
+
+        if matches!(card, Card::Jack | Card::Joker) {
+            let my_pieces = self.find_movable_pieces(color);
+            let all_pieces = self.count_interchangeable_pieces();
+            
+            if !my_pieces.is_empty() && all_pieces >= 2 {
+                return true;
+            }
+        }
+
+        let pieces = self.find_movable_pieces(color);
+        
+       
+        let distances = if card == Card::Seven {
+            vec![1, 2, 3, 4, 5, 6, 7] 
+        } else {
+            card.possible_distances().unwrap_or_default()
+        };
+
+        for &pos in &pieces {
+            for &dist in &distances {
+                let try_backward = (matches!(card, Card::Four | Card::Joker) && dist == 4) 
+                                    || (matches!(card, Card::Seven) && false); // 7 geht nur vorwärts
+
+                if self.can_piece_move_distance(pos, dist, try_backward) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn find_movable_pieces(&self, color: Color) -> Vec<usize> {
+        let mut positions = Vec::new();
+        let target_color = self.teammate_or_self(color); // Partner-Logik
+
+        for (idx, tile) in self.board.tiles.iter().enumerate() {
+            if let Some(piece) = tile {
+                if piece.color == target_color || (piece.color == color) {
+                    if self.player_by_color(color).can_control_piece(*piece) {
+                        positions.push(idx);
+                    }
+                }
+            }
+        }
+        positions
+    }
+
+    fn count_interchangeable_pieces(&self) -> usize {
+        self.board.tiles.iter().enumerate().filter(|(idx, tile)| {
+            if let Some(piece) = tile {
+                if *idx < 64 && piece.left_start {
+                    return true;
+                }
+            }
+            false
+        }).count()
+    }
+    
+    fn can_piece_move_distance(&self, from: usize, dist: u8, backward: bool) -> bool {
+        let piece = self.board.tiles[from].as_ref().unwrap();
+        
+        for to in 0..80 {
+            if !backward {
+                if self.board.distance_between(from as u8, to as u8, piece.color) == Some(dist) {
+                    if let Some(path) = self.board.passed_tiles(from as u8, to as u8, piece.color, false) {
+                        if self.is_path_free(&path) { return true; }
+                    }
+                }
+            } 
+            else {
+                if self.board.distance_between(to as u8, from as u8, piece.color) == Some(dist) {
+                    if let Some(path) = self.board.passed_tiles(from as u8, to as u8, piece.color, true) {
+                        if self.is_path_free(&path) { return true; }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn is_path_free(&self, path: &[u8]) -> bool {
+        for &tile in path {
+            if let Some(p) = &self.board.tiles[tile as usize] {
+                if tile >= 64 { return false; } 
+                if !p.left_start { return false; }
+            }
+        }
+        true
+    }
+
+    fn teammate_or_self(&self, color: Color) -> Color {
+        if self.player_by_color(color).pieces_in_house == 4 {
+            color.teammate()
+        } else {
+            color
+        }
+    }
+
     fn all_players_out_of_cards(&self) -> bool {
         self.players
             .iter()
@@ -520,6 +647,13 @@ impl DogGame for Game {
     }
 
     fn action(&mut self, _card: Card, _action: Action) -> Result<(), &'static str> {
+        
+        if self.split_rest.is_some(){
+            if !matches!(_action.action, ActionKind::Split(_, _)) {
+                return Err("Cannot perform actions other than Split during splitting phase.");
+            }
+        }
+
 
         if !self.current_player().cards.contains(&_card) {
             return Err("Card not in player's hand.");
@@ -948,7 +1082,12 @@ impl DogGame for Game {
             },
 
             ActionKind::Remove => {
+                if self.check_if_any_action_possible() {
+                    return Err("Cannot remove: other action possible.");
+                }
+                
                 let current_player_index = self.current_player_index;
+             
 
                 let card_index = self.players[current_player_index]
                     .cards
