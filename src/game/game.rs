@@ -9,6 +9,7 @@ use super::history::*;
 
 const CARDS_PER_ROUND: [u8;5] = [6,5,4,3,2];
 
+#[derive(Debug, PartialEq)]
 pub enum GameVariant {
     TwoVsTwo,
     ThreeVsThree,
@@ -19,6 +20,7 @@ pub enum GameVariant {
 
 
 pub struct Game {
+    pub game_variant: GameVariant,
     pub board: Board,
     pub history: Vec<HistoryEntry>,
     pub round: usize,
@@ -62,6 +64,7 @@ impl Game {
 
 
         Self {
+            game_variant: GameVariant::TwoVsTwo,
             board: Board::new(4),
             history: Vec::new(),
             round: 1,
@@ -96,6 +99,7 @@ impl Game {
         ]);
 
         Self {
+            game_variant: GameVariant::ThreeVsThree,
             board: Board::new(6),
             history: Vec::new(),
             round: 1,
@@ -131,6 +135,7 @@ impl Game {
         ]);
 
         Self {
+            game_variant: GameVariant::TwoVsTwoVsTwo,
             board: Board::new(6),
             history: Vec::new(),
             round: 1,
@@ -159,6 +164,7 @@ impl Game {
             .collect();
 
         Self {
+            game_variant: GameVariant::FreeForAll(n),
             board: Board::new(n),
             history: Vec::new(),
             round: 1,
@@ -988,7 +994,44 @@ impl DogGame for Game {
                 self.next_player();
             },
 
-            ActionKind::Grab { target_card, target_player } => todo!(),
+            ActionKind::Grab { target_card, target_player } => {
+                // Grab only possible in FFA
+                match self.game_variant {
+                    GameVariant::FreeForAll(_) => {},
+                    _ => return Err("Invalid action: cannot perform grab in team games.")
+                };
+                
+                match _card {
+                    Card::Two => {},
+                    _ => return Err("Invalid action: cannot grab with this card.")
+                };
+
+                let target_player = self.index_of_color(target_player);
+
+                if self.players[target_player].cards.len() < target_card {
+                    return Err("Invalid acion: cannot grab selected card.");
+                }
+
+                // Update player hands
+                let grabbed_card = self.players[target_player].cards.remove(target_card);
+                self.players[self.current_player_index].cards.push(grabbed_card);
+
+                self.history.push( HistoryEntry { 
+                    action: _action, 
+                    
+                    beaten_piece_owner: None, 
+                    interchanged_piece_owner: None, 
+                    placed_piece_owner: None,
+
+                    split_rest_before: None, 
+                    trade_buffer_before: Vec::new(), 
+                    left_start_before: false,
+
+                    cards_dealt: Vec::new(), 
+                });
+
+                self.next_player();
+            },
         }
     
         if self.all_players_out_of_cards() {
