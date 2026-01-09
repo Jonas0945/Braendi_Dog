@@ -7,7 +7,7 @@ use super::player::*;
 use super::board::*;
 use super::history::*;
 
-const CARDS_PER_ROUND: [u8;4] = [5,4,3,2];
+const CARDS_PER_ROUND: [u8;5] = [6,5,4,3,2];
 
 pub enum GameVariant {
     TwoVsTwo,
@@ -987,6 +987,8 @@ impl DogGame for Game {
 
                 self.next_player();
             },
+
+            ActionKind::Grab { target_card, target_player } => todo!(),
         }
     
         if self.all_players_out_of_cards() {
@@ -1157,6 +1159,8 @@ impl DogGame for Game {
 
                 self.current_player_index = entry_player_index;
             },
+
+            ActionKind::Grab { target_card, target_player } => todo!()
         }
 
         Ok(())

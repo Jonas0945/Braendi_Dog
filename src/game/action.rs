@@ -19,19 +19,19 @@ pub enum ActionKind {
     Split { from: Point, to: Point },
     Trade,
     Remove,
-    // Choose { target_card: Card, target_player: usize }
+    Grab { target_card: usize, target_player: Color }
 }
 
 impl FromStr for Action {
     type Err = &'static str;
 
     /// Example inputs:
-    /// "G 0 P" - Green places piece with Joker (= 0)
+    /// "G 0 P " - Green places piece with Joker (= 0)
     /// "Y 4 M 16 20" - Yellow moves from 16 to 20 with 4
     /// "B 11 I 40 45" - Blue interchangees between 40 and 45 with Jack (= 11)
     /// "Y 0 T" - Yellow wants so trade his/her Joker with Green
     /// "R 7 R" - Red removes 7 from his hand
-    /// todo! "O 2 C " - Orange chooses the 2nd card from opponent's hand (Purple)
+    /// todo! "O 2 G 4 P" - Orange grabs the 2nd card from opponent's hand (Purple)
     
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split_whitespace().collect();
@@ -73,7 +73,7 @@ impl FromStr for Action {
                     return Err("Invalid place format");
                 }
 
-                let target_player: Point = parts[3].parse().map_err(|_| "Invalid to point")?; 
+                let target_player: Point = parts[3].parse().map_err(|_| "Invalid target player")?; 
                 
                 ActionKind::Place { target_player }
             }
@@ -92,8 +92,8 @@ impl FromStr for Action {
                     return Err("Invalid interchange format");
                 }
 
-                let a: Point = parts[3].parse().map_err(|_| "Invalid from point")?;
-                let b: Point = parts[4].parse().map_err(|_| "Invalid to point")?;
+                let a: Point = parts[3].parse().map_err(|_| "Invalid a point")?;
+                let b: Point = parts[4].parse().map_err(|_| "Invalid b point")?;
 
                 ActionKind::Interchange { a, b }
             }
@@ -123,6 +123,26 @@ impl FromStr for Action {
                 }
 
                 ActionKind::Remove
+            }
+
+            "G" => {
+                if parts.len() != 5 {
+                    return Err("Invalid grab format");
+                }
+
+                let target_card = parts[3].parse().map_err(|_| "Invalid target card")?;
+
+                let target_player = match parts[4] {
+                    "R" => Color::Red,
+                    "G" => Color::Green,
+                    "B" => Color::Blue,
+                    "Y" => Color::Yellow,
+                    "P" => Color::Purple,
+                    "O" => Color::Orange,
+                    _ => return Err("Invalid player"),
+                };
+
+                ActionKind::Grab { target_card, target_player }
             }
             _ => return Err("Invalid action type"),
         };
@@ -166,6 +186,7 @@ impl Display for Action {
             ActionKind::Trade => format!("T"),
             ActionKind::Split { from, to } => format!("S {from} {to}"),
             ActionKind::Remove => format!("R"),
+            ActionKind::Grab { target_card, target_player } => format!("G {target_card} {target_player}"),
         };
 
         write!(f, "{player_str} {card_str} {action_str}")
