@@ -7,8 +7,9 @@ use super::player::*;
 use super::board::*;
 use super::history::*;
 
-const CARDS_PER_ROUND: [u8;4] = [5,4,3,2];
+const CARDS_PER_ROUND: [u8;5] = [6,5,4,3,2];
 
+#[derive(Debug, PartialEq)]
 pub enum GameVariant {
     TwoVsTwo,
     ThreeVsThree,
@@ -19,6 +20,7 @@ pub enum GameVariant {
 
 
 pub struct Game {
+    pub game_variant: GameVariant,
     pub board: Board,
     pub history: Vec<HistoryEntry>,
     pub round: usize,
@@ -62,6 +64,7 @@ impl Game {
 
 
         Self {
+            game_variant: GameVariant::TwoVsTwo,
             board: Board::new(4),
             history: Vec::new(),
             round: 1,
@@ -96,6 +99,7 @@ impl Game {
         ]);
 
         Self {
+            game_variant: GameVariant::ThreeVsThree,
             board: Board::new(6),
             history: Vec::new(),
             round: 1,
@@ -131,6 +135,7 @@ impl Game {
         ]);
 
         Self {
+            game_variant: GameVariant::TwoVsTwoVsTwo,
             board: Board::new(6),
             history: Vec::new(),
             round: 1,
@@ -159,6 +164,7 @@ impl Game {
             .collect();
 
         Self {
+            game_variant: GameVariant::FreeForAll(n),
             board: Board::new(n),
             history: Vec::new(),
             round: 1,
@@ -233,6 +239,14 @@ impl Game {
 
     pub fn next_player(&mut self) {
         self.current_player_index = (self.current_player_index + 1) % self.players.len();
+    }
+
+    pub fn prev_player(&mut self) {
+        if self.current_player_index == 0 {
+            self.current_player_index = self.players.len() - 1;
+        } else {
+            self.current_player_index -= 1;
+        }
     }
 
     pub fn index_of_color(&self, color: Color) -> usize {
@@ -550,6 +564,8 @@ impl DogGame for Game {
         }
 
         match _action.action {
+
+            // Place: Player can place on of his remaining pieces on the board
             ActionKind::Place { target_player } => {
 
                 match _card {
@@ -600,11 +616,16 @@ impl DogGame for Game {
                     left_start_before: false,
 
                     cards_dealt: Vec::new(),
+
+                    grabbed_from_player: None,
+                    grabbed_card: None,
+                    grabbed_card_index: None,
                 });
 
                 self.next_player();
             }
 
+            // Move: Player can move piece for a given distance
             ActionKind::Move { from, to } => {
                 match _card {
                     Card::Jack => return Err("Cannot move piece with Jack."),
@@ -691,11 +712,16 @@ impl DogGame for Game {
                     left_start_before,
 
                     cards_dealt: Vec::new(),
+
+                    grabbed_from_player: None,
+                    grabbed_card: None,
+                    grabbed_card_index: None,
                 });
 
                 self.next_player();       
             },
 
+            // Interchange: Player can switch the position of two pieces on the ring
             ActionKind::Interchange  { a, b } => {
 
                 match _card {
@@ -745,11 +771,16 @@ impl DogGame for Game {
                     left_start_before: true,
 
                     cards_dealt: Vec::new(),
+
+                    grabbed_from_player: None,
+                    grabbed_card: None,
+                    grabbed_card_index: None,
                 });
                 
                 self.next_player();
             },
 
+            // Trade: Player trades on card to his team members at the beginning of each round
             ActionKind::Trade => {
                 if !self.trading_phase {
                     return Err("Cannot trade cards outside trading phase.");
@@ -796,11 +827,16 @@ impl DogGame for Game {
                     left_start_before: false,
 
                     cards_dealt: Vec::new(),
+
+                    grabbed_from_player: None,
+                    grabbed_card: None,
+                    grabbed_card_index: None,
                 });
 
                 self.next_player();         
             },
 
+            // Split: Player can distribute move value to different pieces
             ActionKind::Split { from,to } => {
                 match _card {
                     Card::Seven | Card::Joker => {},
@@ -885,6 +921,10 @@ impl DogGame for Game {
                             left_start_before,
 
                             cards_dealt: Vec::new(),
+
+                            grabbed_from_player: None,
+                            grabbed_card: None,
+                            grabbed_card_index: None,
                         });
 
                         // Update step-mechanism
@@ -934,6 +974,10 @@ impl DogGame for Game {
                         left_start_before,
 
                         cards_dealt: Vec::new(),
+
+                        grabbed_from_player: None,
+                        grabbed_card: None,
+                        grabbed_card_index: None,
                     });
 
                     remaining_steps -= distance;
@@ -954,6 +998,7 @@ impl DogGame for Game {
                 }
             },
 
+            // Remove: Player removes one card in his hand of no other action is possible
             ActionKind::Remove => {
                 if self.check_if_any_action_possible() {
                     return Err("Cannot remove: other action possible.");
@@ -983,6 +1028,58 @@ impl DogGame for Game {
                     left_start_before: false,
 
                     cards_dealt: Vec::new(),
+
+                    grabbed_from_player: None,
+                    grabbed_card: None,
+                    grabbed_card_index: None,
+                });
+
+                self.next_player();
+            },
+
+            // Grab: Player draws one card from target_player using Card::Two
+            ActionKind::Grab { target_card, target_player } => {
+
+                // Grab only possible in FFA
+                match self.game_variant {
+                    GameVariant::FreeForAll(_) => {},
+                    _ => return Err("Invalid action: cannot perform grab in team games.")
+                };
+                
+                match _card {
+                    Card::Two => {},
+                    _ => return Err("Invalid action: cannot grab with this card.")
+                };
+
+                let target_player = self.index_of_color(target_player);
+
+                if target_card >= self.players[target_player].cards.len() {
+                    return Err("Invalid action: cannot grab selected card.");
+                }
+
+                // Update player hands
+                let grabbed_card = self.players[target_player].cards.remove(target_card);
+                self.players[self.current_player_index].cards.push(grabbed_card);
+
+                self.players[self.current_player_index].remove_card(_card);
+                self.discard.push(_card);
+
+                self.history.push( HistoryEntry { 
+                    action: _action, 
+                    
+                    beaten_piece_owner: None, 
+                    interchanged_piece_owner: None, 
+                    placed_piece_owner: None,
+
+                    split_rest_before: None, 
+                    trade_buffer_before: Vec::new(), 
+                    left_start_before: false,
+
+                    cards_dealt: Vec::new(),
+
+                    grabbed_from_player: Some(target_player),
+                    grabbed_card: Some(grabbed_card),
+                    grabbed_card_index: Some(target_card),
                 });
 
                 self.next_player();
@@ -1157,6 +1254,36 @@ impl DogGame for Game {
 
                 self.current_player_index = entry_player_index;
             },
+
+            ActionKind::Grab { .. } => {
+                let grabbed_from_player = entry
+                    .grabbed_from_player
+                    .ok_or("Undo grab failed: missing grabbed_from_player")?;
+
+                let grabbed_card = entry
+                    .grabbed_card
+                    .ok_or("Undo grab failed: missing grabbed_card")?;
+
+                let grabbed_card_index = entry
+                    .grabbed_card_index
+                    .ok_or("Undo grab failed: missing grabbed_card_index")?;
+
+                self.players[grabbed_from_player]
+                    .cards
+                    .insert(grabbed_card_index, grabbed_card);
+
+                let card_index = self.players[entry_player_index]
+                    .cards
+                    .iter()
+                    .position(|c| *c == grabbed_card)
+                    .ok_or("Undo grab failed: card not found in current player hand")?;
+
+                self.players[entry_player_index].cards.remove(card_index);
+                self.discard.pop();
+                self.players[entry_player_index].cards.push(played_card);
+
+                self.prev_player();
+            }
         }
 
         Ok(())
@@ -1264,8 +1391,6 @@ impl DogGame for Game {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    
 
     mod helper_tests {
         use super::*;
@@ -3703,7 +3828,130 @@ mod tests {
                 assert_eq!(game.history.len(), history_len);
             }
         }
-    
+        
+
+        mod action_grab_tests {
+            use super::*;
+
+            #[test]
+            fn grab_two_card_success() {
+                let mut game = Game::new(GameVariant::FreeForAll(3));
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Two];
+                game.players[1].cards = vec![Card::Ace, Card::Five];
+
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Grab {
+                        target_player: Color::Green,
+                        target_card: 0,
+                    },
+                    card: Card::Two,
+                };
+
+                assert!(game.action(Card::Two, action).is_ok());
+
+                assert_eq!(game.players[1].cards, vec![Card::Five]);
+
+                assert_eq!(game.players[0].cards, vec![Card::Ace]);
+
+                let entry = game.history.last().unwrap();
+                assert_eq!(entry.grabbed_from_player, Some(1));
+                assert_eq!(entry.grabbed_card, Some(Card::Ace));
+                assert_eq!(entry.grabbed_card_index, Some(0));
+
+                assert_eq!(game.current_player_index, 1);
+            }
+
+            #[test]
+            fn grab_not_allowed_in_team_game() {
+                let mut game = Game::new(GameVariant::TwoVsTwo);
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Two];
+                game.players[1].cards = vec![Card::Ace];
+
+                let action = Action {
+                    player: game.players[0].color,
+                    action: ActionKind::Grab {
+                        target_player: game.players[1].color,
+                        target_card: 0,
+                    },
+                    card: Card::Two,
+                };
+
+                assert!(game.action(Card::Two, action).is_err());
+            }
+
+            #[test]
+            fn grab_not_allowed_with_other_card() {
+                let mut game = Game::new(GameVariant::FreeForAll(3));
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Three];
+                game.players[1].cards = vec![Card::Ace];
+
+                let action = Action {
+                    player: game.players[0].color,
+                    action: ActionKind::Grab {
+                        target_player: game.players[1].color,
+                        target_card: 0,
+                    },
+                    card: Card::Three,
+                };
+
+                assert!(game.action(Card::Three, action).is_err());
+            }
+
+            #[test]
+            fn grab_invalid_card_index_fails() {
+                let mut game = Game::new(GameVariant::FreeForAll(3));
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Two];
+                game.players[1].cards = vec![Card::Ace];
+
+                let action = Action {
+                    player: game.players[0].color,
+                    action: ActionKind::Grab {
+                        target_player: game.players[1].color,
+                        target_card: 1, // not in scope
+                    },
+                    card: Card::Two,
+                };
+
+                assert!(game.action(Card::Two, action).is_err());
+
+                assert_eq!(game.players[1].cards, vec![Card::Ace]);
+                assert_eq!(game.players[0].cards, vec![Card::Two]);
+                assert!(game.history.is_empty());
+            }
+
+            #[test]
+            fn grab_does_not_modify_board_or_pieces() {
+                let mut game = Game::new(GameVariant::FreeForAll(3));
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Two];
+                game.players[1].cards = vec![Card::Ace];
+
+                let board_before = game.board.tiles.clone();
+
+                let action = Action {
+                    player: game.players[0].color,
+                    action: ActionKind::Grab {
+                        target_player: game.players[1].color,
+                        target_card: 0,
+                    },
+                    card: Card::Two,
+                };
+
+                let _ = game.action(Card::Two, action);
+
+                assert_eq!(game.board.tiles, board_before);
+            }
+        }
     }    
 
     mod undo_tests {
@@ -4572,6 +4820,118 @@ mod tests {
                     assert_eq!(game.trade_buffer.len(), 0);
                     assert_eq!(game.players[0].cards.len(), 2);
                     assert!(game.players[0].cards.contains(&Card::Five));               
+                }
+            }
+        
+            mod undo_grab_tests {
+                use super::*;
+
+                #[test]
+                fn undo_grab_restores_hands() {
+                    let mut game = Game::new(GameVariant::FreeForAll(3));
+                    game.trading_phase = false;
+
+                    game.players[0].cards = vec![Card::Two];
+                    game.players[1].cards = vec![Card::Ace, Card::King];
+
+                    let action = Action {
+                        player: Color::Red,
+                        action: ActionKind::Grab {
+                            target_player: Color::Green,
+                            target_card: 1,
+                        },
+                        card: Card::Two,
+                    };
+
+                    assert!(game.action(Card::Two, action).is_ok());
+
+                    assert_eq!(game.players[0].cards, vec![Card::King]);
+                    assert_eq!(game.players[1].cards, vec![Card::Ace]);
+
+                    assert!(game.undo_action().is_ok());
+
+                    assert_eq!(game.players[0].cards, vec![Card::Two]);
+                    assert_eq!(game.players[1].cards, vec![Card::Ace, Card::King]);
+                }
+
+                #[test]
+                fn undo_grab_restores_card_at_original_index() {
+                    let mut game = Game::new(GameVariant::FreeForAll(3));
+                    game.trading_phase = false;
+
+                    game.current_player_index = 0;
+
+                    game.players[0].cards = vec![Card::Two];
+                    game.players[1].cards = vec![Card::Ace, Card::King, Card::Queen];
+
+                    let action = Action {
+                        player: Color::Red,
+                        action: ActionKind::Grab {
+                            target_player: Color::Green,
+                            target_card: 1, // King
+                        },
+                        card: Card::Two,
+                    };
+
+                    assert!(game.action(Card::Two, action).is_ok());
+                    assert!(game.undo_action().is_ok());
+
+                    assert_eq!(
+                        game.players[1].cards,
+                        vec![Card::Ace, Card::King, Card::Queen]
+                    );
+                }
+
+                #[test]
+                fn undo_grab_restores_current_player() {
+                    let mut game = Game::new(GameVariant::FreeForAll(3));
+                    game.trading_phase = false;
+
+                    game.current_player_index = 0;
+
+                    game.players[0].cards = vec![Card::Two];
+                    game.players[1].cards = vec![Card::Ace];
+
+                    let action = Action {
+                        player: Color::Red,
+                        action: ActionKind::Grab {
+                            target_player: Color::Green,
+                            target_card: 0,
+                        },
+                        card: Card::Two,
+                    };
+
+                    assert!(game.action(Card::Two, action).is_ok());
+                    assert_ne!(game.current_player_index, 0);
+
+                    assert!(game.undo_action().is_ok());
+                    assert_eq!(game.current_player_index, 0);
+                }
+
+                #[test]
+                fn undo_grab_removes_history_entry() {
+                    let mut game = Game::new(GameVariant::FreeForAll(3));
+                    game.trading_phase = false;
+
+                    game.players[0].cards = vec![Card::Two];
+                    game.players[1].cards = vec![Card::Ace];
+
+                    let history_len_before = game.history.len();
+
+                    let action = Action {
+                        player: Color::Red,
+                        action: ActionKind::Grab {
+                            target_player: Color::Green,
+                            target_card: 0,
+                        },
+                        card: Card::Two,
+                    };
+
+                    assert!(game.action(Card::Two, action).is_ok());
+                    assert_eq!(game.history.len(), history_len_before + 1);
+
+                    assert!(game.undo_action().is_ok());
+                    assert_eq!(game.history.len(), history_len_before);
                 }
             }
         }
