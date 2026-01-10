@@ -12,7 +12,11 @@ pub struct HistoryEntry {
     pub trade_buffer_before: Vec<(usize, Card)>,
     pub left_start_before: bool,
 
-    pub cards_dealt: Vec<(usize, Vec<Card>)>
+    pub cards_dealt: Vec<(usize, Vec<Card>)>,
+
+    pub grabbed_from_player: Option<usize>,
+    pub grabbed_card: Option<Card>,
+    pub grabbed_card_index: Option<usize>,
 }
 
 
