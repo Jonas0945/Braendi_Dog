@@ -4933,8 +4933,6 @@ mod tests {
                     assert!(game.undo_action().is_ok());
                     assert_eq!(game.history.len(), history_len_before);
                 }
-
-
             }
         }
 
