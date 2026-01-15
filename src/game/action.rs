@@ -7,7 +7,7 @@ use super::color::Color;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Action {
     pub player: Color,
-    pub card: Card,
+    pub card: Option<Card>,
     pub action: ActionKind,
 }
 
@@ -50,20 +50,21 @@ impl FromStr for Action {
         };
 
         let card = match parts[1] {
-            "13" => Card::King,
-            "12" => Card::Queen,
-            "11" => Card::Jack,
-            "10" => Card::Ten,
-            "9" => Card::Nine,
-            "8" => Card::Eight,
-            "7" => Card::Seven,
-            "6" => Card::Six,
-            "5" => Card::Five,
-            "4" => Card::Four,
-            "3" => Card::Three,
-            "2" => Card::Two,
-            "1" => Card::Ace,
-            "0" => Card::Joker,
+            "13" => Some(Card::King),
+            "12" => Some(Card::Queen),
+            "11" => Some(Card::Jack),
+            "10" => Some(Card::Ten),
+            "9" => Some(Card::Nine),
+            "8" => Some(Card::Eight),
+            "7" => Some(Card::Seven),
+            "6" => Some(Card::Six),
+            "5" => Some(Card::Five),
+            "4" => Some(Card::Four),
+            "3" => Some(Card::Three),
+            "2" => Some(Card::Two),
+            "1" => Some(Card::Ace),
+            "0" => Some(Card::Joker),
+            "N" => None,
             _ => return Err("Invalid card"),
         };
 
@@ -163,20 +164,21 @@ impl Display for Action {
         };
 
         let card_str = match self.card {
-            Card::King => "King",
-            Card::Queen => "Queen",
-            Card::Jack => "Jack",
-            Card::Ten => "10",
-            Card::Nine => "9",
-            Card::Eight => "8",
-            Card::Seven => "7",
-            Card::Six => "6",
-            Card::Five => "5",
-            Card::Four => "4",
-            Card::Three => "3",
-            Card::Two => "2",
-            Card::Ace => "Ace",
-            Card::Joker => "Joker",
+            Some(Card::King) => "King",
+            Some(Card::Queen) => "Queen",
+            Some(Card::Jack) => "Jack",
+            Some(Card::Ten) => "10",
+            Some(Card::Nine) => "9",
+            Some(Card::Eight) => "8",
+            Some(Card::Seven) => "7",
+            Some(Card::Six) => "6",
+            Some(Card::Five) => "5",
+            Some(Card::Four) => "4",
+            Some(Card::Three) => "3",
+            Some(Card::Two) => "2",
+            Some(Card::Ace) => "Ace",
+            Some(Card::Joker) => "Joker",
+            None => "",
         };
 
         let action_str = match self.action {
