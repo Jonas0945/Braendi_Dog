@@ -764,7 +764,9 @@ impl Game {
 
         // Trade cards when every player has chosen a card
         if self.trade_buffer.len() == self.players.len() {
-            let trades: Vec<_> = self.trade_buffer.drain(..).collect();
+            let trades: Vec<_> = self.trade_buffer
+                .drain(..)
+                .collect();
 
             for (from_index, card) in trades {
                 let to_index = self.teammate_index(from_index)
@@ -775,7 +777,7 @@ impl Game {
             self.trading_phase = false;
         }
 
-        // History-Eintrag speichern
+        // History update
         self.history.push(HistoryEntry {
             action: _action,
 
@@ -792,6 +794,76 @@ impl Game {
             grabbed_from_player: None,
             grabbed_card: None,
             grabbed_card_index: None,
+        });
+
+        self.next_player();
+
+        Ok(())
+    }
+
+    fn action_trade_grab(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
+
+        let ActionKind::TradeGrab { target_card } = _action.action else {
+            return Err("Invalid action for trade grab");
+        };
+
+        match self.game_variant {
+            GameVariant::FreeForAll(_) => {}
+            _ => return Err("Invalid action: cannot perform trade grab in team games."),
+        };
+
+        if !self.trading_phase {
+            return Err("Cannot trade grab cards outside trading phase");
+        }
+
+        let previous_player = if player_index == 0 {
+                self.players.len() - 1
+            } else {
+                player_index - 1
+        };
+
+        if target_card >= self.players[previous_player].cards.len() {
+            return Err("Invalid action: cannot grab selected card");
+        }
+
+        let trade_buffer_before = self.trade_buffer.clone();
+
+        let removed_card = self.player_mut_by_index(previous_player)
+            .cards
+            .remove(target_card);
+
+        self.trade_buffer.push((previous_player, removed_card));
+
+        if self.trade_buffer.len() == self.players.len() {
+            let trades: Vec<_> = self.trade_buffer
+                .drain(..)
+                .collect();
+
+            for (from_index, card) in trades {
+                let to_index = (from_index + 1) % self.players.len();
+                self.player_mut_by_index(to_index).cards.push(card);
+            }
+
+            self.trading_phase = false;
+        }
+
+        // History update
+        self.history.push(HistoryEntry { 
+            action: _action,
+
+            beaten_piece_owner: None, 
+            interchanged_piece_owner: None, 
+            placed_piece_owner: None, 
+            
+            split_rest_before: None, 
+            trade_buffer_before, 
+            left_start_before: false, 
+            
+            cards_dealt: Vec::new(), 
+            
+            grabbed_from_player: Some(previous_player), 
+            grabbed_card: Some(removed_card), 
+            grabbed_card_index: Some(target_card) 
         });
 
         self.next_player();
@@ -1151,6 +1223,11 @@ impl DogGame for Game {
                 self.action_trade(current_player, _action)?;        
             },
 
+            // TradeGrab: FFA variant of Trade at the beginning of each new round (player chooses card of right-sided neighbour)
+            ActionKind::TradeGrab { .. } => {
+                self.action_trade_grab(current_player, _action)?;
+            }
+
             // Split: Player can distribute move value to different pieces
             ActionKind::Split { .. } => {
                 self.action_split(current_player, _action)?;
@@ -1293,6 +1370,10 @@ impl DogGame for Game {
                 self.trade_buffer = entry.trade_buffer_before;
                 self.current_player_index = entry_player_index;
             },
+
+            ActionKind::TradeGrab { target_card } => {
+                todo!()
+            }
 
             ActionKind::Split { from, to } => {
 
