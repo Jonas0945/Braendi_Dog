@@ -26,7 +26,7 @@ pub struct Game {
     pub round: usize,
     
     pub trading_phase: bool,
-    pub trade_buffer: Vec<(usize,Card)>,
+    pub trade_buffer: Vec<(usize, usize, Card)>,
 
     pub deck: Deck,
     pub discard: Vec<Card>,
@@ -550,8 +550,15 @@ impl Game {
 
         self.players[target_player].pieces_to_place -= 1;
 
+        let played_card_index = Some(self.current_player()
+            .cards.iter()
+            .position(|&c| Some(c) == _action.card)
+            .unwrap()
+        );
+
         self.history.push(HistoryEntry {
             action: _action,
+            played_card_index,
 
             beaten_piece_owner,
             interchanged_piece_owner: None,
@@ -649,8 +656,15 @@ impl Game {
             self.discard.push(card);
         }
 
+        let played_card_index = Some(self.current_player()
+            .cards.iter()
+            .position(|&c| Some(c) == _action.card)
+            .unwrap()
+        );
+
         self.history.push(HistoryEntry { 
             action: _action,
+            played_card_index,
 
             beaten_piece_owner, 
             interchanged_piece_owner: None,
@@ -713,8 +727,15 @@ impl Game {
             self.discard.push(card);
         }
 
+        let played_card_index = Some(self.current_player()
+            .cards.iter()
+            .position(|&c| Some(c) == _action.card)
+            .unwrap()
+        );
+
         self.history.push(HistoryEntry {
             action: _action,
+            played_card_index,
 
             beaten_piece_owner: None,
             interchanged_piece_owner: Some((a_piece.owner, b_piece.owner)),
@@ -760,7 +781,10 @@ impl Game {
             .ok_or("Cannot trade: card not found in player's hand")?;
         let removed_card = self.player_mut_by_index(player_index).cards.remove(card_index);
 
-        self.trade_buffer.push((player_index, removed_card));
+        let teammate_index = self.teammate_index(player_index)
+            .ok_or("Trade: teammate not found")?;
+
+        self.trade_buffer.push((player_index, teammate_index, removed_card));
 
         // Trade cards when every player has chosen a card
         if self.trade_buffer.len() == self.players.len() {
@@ -768,18 +792,23 @@ impl Game {
                 .drain(..)
                 .collect();
 
-            for (from_index, card) in trades {
-                let to_index = self.teammate_index(from_index)
-                    .ok_or("Trade: teammate not found")?;
+            for (_from_index, to_index, card) in trades {
                 self.player_mut_by_index(to_index).cards.push(card);
             }
 
             self.trading_phase = false;
         }
 
+        let played_card_index = Some(self.current_player()
+            .cards.iter()
+            .position(|&c| Some(c) == _action.card)
+            .unwrap()
+        );
+
         // History update
         self.history.push(HistoryEntry {
             action: _action,
+            played_card_index,
 
             beaten_piece_owner: None,
             interchanged_piece_owner: None,
@@ -832,24 +861,30 @@ impl Game {
             .cards
             .remove(target_card);
 
-        self.trade_buffer.push((previous_player, removed_card));
+        self.trade_buffer.push((previous_player, player_index, removed_card));
 
         if self.trade_buffer.len() == self.players.len() {
             let trades: Vec<_> = self.trade_buffer
                 .drain(..)
                 .collect();
 
-            for (from_index, card) in trades {
-                let to_index = (from_index + 1) % self.players.len();
+            for (_from_index, to_index, card) in trades {
                 self.player_mut_by_index(to_index).cards.push(card);
             }
 
             self.trading_phase = false;
         }
 
+        let played_card_index = Some(self.current_player()
+            .cards.iter()
+            .position(|&c| Some(c) == _action.card)
+            .unwrap()
+        );
+
         // History update
         self.history.push(HistoryEntry { 
             action: _action,
+            played_card_index,
 
             beaten_piece_owner: None, 
             interchanged_piece_owner: None, 
@@ -928,6 +963,12 @@ impl Game {
         let mut split_rest_before = self.split_rest;
         let mut left_start_before = moving_piece.left_start;
 
+        let played_card_index = Some(self.current_player()
+            .cards.iter()
+            .position(|&c| Some(c) == _action.card)
+            .unwrap()
+        );
+
         for &tile in &path {
 
             // Create "mini"- history if piece is beaten
@@ -945,6 +986,7 @@ impl Game {
                         card: _action.card,
                         action: ActionKind::Split { from: current_position, to: tile },
                     },
+                    played_card_index,
 
                     beaten_piece_owner: Some(beaten_piece.owner),
                     interchanged_piece_owner: None,
@@ -997,6 +1039,7 @@ impl Game {
                     card: _action.card,
                     action: ActionKind::Split { from: current_position, to },
                 },
+                played_card_index,
 
                 beaten_piece_owner: None,
                 interchanged_piece_owner: None,
@@ -1037,18 +1080,20 @@ impl Game {
 
         let card = _action.card.ok_or("Remove action requires a card.")?;
 
-        let card_index = self.players[player_index]
+        let played_card_index = Some(self.players[player_index]
             .cards
             .iter()
             .position(|&c| c == card)
-            .ok_or("Cannot remove: card not found in player's hand.")?;
+            .ok_or("Cannot remove: card not found in player's hand.")?
+        );
 
-        self.players[player_index].cards.remove(card_index);
+        self.players[player_index].remove_card(card);
         self.discard.push(card);
 
         // History update
         self.history.push(HistoryEntry {
             action: _action,
+            played_card_index,
 
             beaten_piece_owner: None,
             interchanged_piece_owner: None,
@@ -1107,9 +1152,16 @@ impl Game {
         self.players[player_index].remove_card(card);
         self.discard.push(card);
 
+        let played_card_index = Some(self.current_player()
+            .cards.iter()
+            .position(|&c| Some(c) == _action.card)
+            .unwrap()
+        );
+
         // History update
         self.history.push(HistoryEntry {
             action: _action,
+            played_card_index,
 
             beaten_piece_owner: None,
             interchanged_piece_owner: None,
@@ -1265,6 +1317,7 @@ impl DogGame for Game {
 
         let entry_player_index = self.index_of_color(entry.action.player);
         let played_card = entry.action.card;
+        let played_card_index = entry.played_card_index.unwrap();
 
         match entry.action.action {
             ActionKind::Place { .. }=> {
@@ -1287,7 +1340,7 @@ impl DogGame for Game {
                 }
 
                 self.discard.pop();
-                self.players[entry_player_index].cards.push(played_card.unwrap());
+                self.players[entry_player_index].cards.insert(played_card_index, played_card.unwrap());
 
                 self.current_player_index = entry_player_index;
             },
@@ -1338,7 +1391,7 @@ impl DogGame for Game {
                 }
 
                 self.discard.pop();
-                self.players[entry_player_index].cards.push(played_card.unwrap());
+                self.players[entry_player_index].cards.insert(played_card_index, played_card.unwrap());
 
                 self.current_player_index = entry_player_index;
             },
@@ -1346,33 +1399,69 @@ impl DogGame for Game {
             ActionKind::Trade => {
 
                 // Check if trade phase just ended
-                if entry.trade_buffer_before.len() == 3 {
-                    
-                    let mut trades: Vec<_> = entry.trade_buffer_before.clone();
-                    trades.push((entry_player_index, played_card.unwrap()));
+                if entry.trade_buffer_before.len() == (self.players.len() - 1) {
 
-                    for (player_index, card) in trades {
-                        for teammate_index in self.teammate_indices(player_index) {
-                            let pos = self.players[teammate_index]
-                                .cards
-                                .iter()
-                                .position(|&c| c == card)
-                                .expect("Traded card must exist in teammate hand");
-                            self.players[teammate_index].cards.remove(pos);
-                        }
+                    let mut trades: Vec<_> = entry.trade_buffer_before.clone();
+                    trades.push((
+                        entry_player_index,
+                        self.teammate_index(entry_player_index)
+                            .expect("Teammate must exist"),
+                        played_card.unwrap(),
+                    ));
+
+                    // Reverse trade
+                    for (from, to, card) in trades {
+                        let pos = self.players[to]
+                            .cards
+                            .iter()
+                            .position(|&c| c == card)
+                            .expect("Traded card must exist in recipient hand");
+
+                        self.players[to].cards.remove(pos);
+                        self.players[from].cards.push(card);
                     }
 
                     self.trading_phase = true;
 
                 }
 
-                self.players[entry_player_index].cards.push(played_card.unwrap());
+                self.players[entry_player_index]
+                    .cards
+                    .push(played_card.unwrap());
+
                 self.trade_buffer = entry.trade_buffer_before;
                 self.current_player_index = entry_player_index;
             },
 
-            ActionKind::TradeGrab { target_card } => {
-                todo!()
+            ActionKind::TradeGrab { .. } => {
+                // Check if trade phase just ended
+                if entry.trade_buffer_before.len() == (self.players.len() - 1) {
+
+                    let mut trades: Vec<_> = entry.trade_buffer_before.clone();
+                    trades.push((
+                        entry.grabbed_from_player.unwrap(),
+                        entry_player_index,
+                        entry.grabbed_card.unwrap(),
+                    ));
+
+                    // Reverse trade
+                    for (from, to, card) in trades {
+                        let pos = self.players[to]
+                            .cards
+                            .iter()
+                            .position(|&c| c == card)
+                            .expect("Traded card must exist in recipient hand");
+
+                        self.players[to].cards.remove(pos);
+                        self.players[from].cards.push(card);
+                    }
+
+                    self.trading_phase = true;
+
+                }
+
+                self.trade_buffer = entry.trade_buffer_before;
+                self.current_player_index = entry_player_index;
             }
 
             ActionKind::Split { from, to } => {
@@ -1402,7 +1491,7 @@ impl DogGame for Game {
                 // Return card if split just began
                 if entry.split_rest_before.is_none() {
                     self.discard.pop();
-                    self.players[entry_player_index].cards.push(played_card.unwrap());
+                    self.players[entry_player_index].cards.insert(played_card_index, played_card.unwrap());
                 }
 
                 self.split_rest = entry.split_rest_before;
@@ -1441,7 +1530,7 @@ impl DogGame for Game {
 
                 self.players[entry_player_index].cards.remove(card_index);
                 self.discard.pop();
-                self.players[entry_player_index].cards.push(played_card.unwrap());
+                self.players[entry_player_index].cards.insert(played_card_index, played_card.unwrap());
 
                 self.prev_player();
             }
