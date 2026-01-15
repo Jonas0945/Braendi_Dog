@@ -191,7 +191,7 @@ impl Game {
             history: Vec::new(),
             round: 1,
 
-            trading_phase: false,
+            trading_phase: true,
             trade_buffer: Vec::new(),
 
             deck: Deck::new(),
@@ -543,18 +543,18 @@ impl Game {
 
         self.board.tiles[start] = Some(Piece::new(target_player));
 
+        let played_card_index = Some(self.current_player()
+            .cards.iter()
+            .position(|&c| Some(c) == _action.card)
+            .unwrap()
+        );
+
         if let Some(card) = _action.card {
             self.player_mut_by_index(player_index).remove_card(card);
             self.discard.push(card);
         }
 
         self.players[target_player].pieces_to_place -= 1;
-
-        let played_card_index = Some(self.current_player()
-            .cards.iter()
-            .position(|&c| Some(c) == _action.card)
-            .unwrap()
-        );
 
         self.history.push(HistoryEntry {
             action: _action,
@@ -651,16 +651,16 @@ impl Game {
             self.players[moving_piece.owner].pieces_in_house += 1;
         }
 
-        if let Some(card) = _action.card {
-            self.player_mut_by_index(player_index).remove_card(card);
-            self.discard.push(card);
-        }
-
         let played_card_index = Some(self.current_player()
             .cards.iter()
             .position(|&c| Some(c) == _action.card)
             .unwrap()
         );
+
+        if let Some(card) = _action.card {
+            self.player_mut_by_index(player_index).remove_card(card);
+            self.discard.push(card);
+        }
 
         self.history.push(HistoryEntry { 
             action: _action,
@@ -722,16 +722,15 @@ impl Game {
         self.board.tiles[a] = Some(b_piece);
         self.board.tiles[b] = Some(a_piece);
 
-        if let Some(card) = _action.card {
-            self.player_mut_by_index(player_index).remove_card(card);
-            self.discard.push(card);
-        }
-
         let played_card_index = Some(self.current_player()
             .cards.iter()
             .position(|&c| Some(c) == _action.card)
             .unwrap()
         );
+
+        self.player_mut_by_index(player_index).remove_card(_action.card.unwrap());
+        self.discard.push(_action.card.unwrap());
+
 
         self.history.push(HistoryEntry {
             action: _action,
@@ -774,12 +773,13 @@ impl Game {
         }
 
         let card = _action.card.ok_or("Trade requires a card")?;
-        let card_index = self.player_mut_by_index(player_index)
+        let played_card_index = Some(self.player_mut_by_index(player_index)
             .cards
             .iter()
             .position(|&c| c == card)
-            .ok_or("Cannot trade: card not found in player's hand")?;
-        let removed_card = self.player_mut_by_index(player_index).cards.remove(card_index);
+            .ok_or("Cannot trade: card not found in player's hand")?
+        );
+        let removed_card = self.player_mut_by_index(player_index).cards.remove(played_card_index.unwrap());
 
         let teammate_index = self.teammate_index(player_index)
             .ok_or("Trade: teammate not found")?;
@@ -798,12 +798,6 @@ impl Game {
 
             self.trading_phase = false;
         }
-
-        let played_card_index = Some(self.current_player()
-            .cards.iter()
-            .position(|&c| Some(c) == _action.card)
-            .unwrap()
-        );
 
         // History update
         self.history.push(HistoryEntry {
@@ -835,6 +829,10 @@ impl Game {
         let ActionKind::TradeGrab { target_card } = _action.action else {
             return Err("Invalid action for trade grab");
         };
+
+        if _action.card.is_some() {
+            return Err("Invalid action: trade grab doesn't need card");
+        }
 
         match self.game_variant {
             GameVariant::FreeForAll(_) => {}
@@ -875,16 +873,10 @@ impl Game {
             self.trading_phase = false;
         }
 
-        let played_card_index = Some(self.current_player()
-            .cards.iter()
-            .position(|&c| Some(c) == _action.card)
-            .unwrap()
-        );
-
         // History update
         self.history.push(HistoryEntry { 
             action: _action,
-            played_card_index,
+            played_card_index: None,
 
             beaten_piece_owner: None, 
             interchanged_piece_owner: None, 
@@ -1149,14 +1141,14 @@ impl Game {
 
         self.players[player_index].cards.push(grabbed_card);
 
-        self.players[player_index].remove_card(card);
-        self.discard.push(card);
-
         let played_card_index = Some(self.current_player()
             .cards.iter()
             .position(|&c| Some(c) == _action.card)
             .unwrap()
         );
+
+        self.players[player_index].remove_card(card);
+        self.discard.push(card);
 
         // History update
         self.history.push(HistoryEntry {
@@ -1234,21 +1226,30 @@ impl DogGame for Game {
         }
 
         // Split check
-        if self.split_rest.is_some(){
-            if !matches!(_action.action, ActionKind::Split { .. }) {
+        if self.split_rest.is_some() && !matches!(_action.action, ActionKind::Split { .. }) {
                 return Err("Cannot perform actions other than Split during splitting phase.");
-            }
         }
 
         // Trading phase check
-        if self.trading_phase && !matches!(_action.action, ActionKind::Trade) {
+        if self.trading_phase && !matches!(_action.action, ActionKind::Trade | ActionKind::TradeGrab { .. }) {
             return Err("Cannot perform actions other than Trade during swapping phase.");
         }
 
-        if let Some(c) = card {
-            if !self.current_player().cards.contains(&c) {
-                return Err("Card not in player's hand.");
+        // Card check
+        match _action.action {
+            ActionKind::TradeGrab { .. } => {
+                if card.is_some() {
+                    return Err("Invalid action: TradeGrab does not use a card.");
+                }
             }
+            _ => {
+                let c = card.ok_or("Invalid action: this action requires a card")?;
+
+                if !self.current_player().cards.contains(&c) {
+                    return Err("Invalid action: Card not in player's hand.");
+                }
+            }
+
         }
 
         let current_player = self.current_player_index;
@@ -1410,15 +1411,8 @@ impl DogGame for Game {
                     ));
 
                     // Reverse trade
-                    for (from, to, card) in trades {
-                        let pos = self.players[to]
-                            .cards
-                            .iter()
-                            .position(|&c| c == card)
-                            .expect("Traded card must exist in recipient hand");
-
-                        self.players[to].cards.remove(pos);
-                        self.players[from].cards.push(card);
+                    for (_, to, card) in trades {
+                        self.players[to].remove_card(card);
                     }
 
                     self.trading_phase = true;
@@ -4199,6 +4193,161 @@ mod tests {
                 let _ = game.action(Some(Card::Two), action);
 
                 assert_eq!(game.board.tiles, board_before);
+            }
+        }
+    
+        mod action_trade_grab_tests {
+            use super::*;
+
+            #[test]
+            fn trade_grab_successful() {
+                let mut game = Game::new_free_for_all(3);
+                
+                game.players[0].cards = vec![Card::Ace];
+                game.players[1].cards = vec![Card::Two];
+                game.players[2].cards = vec![Card::Three, Card::Four];
+
+                let action = Action {
+                    player: game.players[0].color,
+                    card: None,
+                    action: ActionKind::TradeGrab { target_card: 0 } // Three of player 3
+                };
+
+                assert!(game.action(None, action).is_ok());
+
+                assert_eq!(game.players[2].cards.len(), 1);
+                assert!(!game.players[2].cards.contains(&Card::Three));
+                assert_eq!(game.trade_buffer, [(2, 0, Card::Three)]);
+            }
+
+            #[test]
+            fn trade_grab_full_round_successful() {
+                let mut game = Game::new_free_for_all(2);
+                
+                game.players[0].cards = vec![Card::Ace, Card::Two];
+                game.players[1].cards = vec![Card::Three, Card::Four];
+
+                let action1 = Action {
+                    player: game.players[0].color,
+                    card: None,
+                    action: ActionKind::TradeGrab { target_card: 0 }
+                };
+
+                let action2 = Action {
+                    player: game.players[1].color,
+                    card: None,
+                    action: ActionKind::TradeGrab { target_card: 1 }
+                };
+                
+                // First trade grab
+                assert!(game.action(None, action1).is_ok());
+
+                assert_eq!(game.players[1].cards.len(), 1);
+                assert_eq!(game.players[0].cards.len(), 2);
+                assert!(!game.players[1].cards.contains(&Card::Three));
+                assert_eq!(game.trade_buffer, [(1, 0, Card::Three)]);
+
+                // Second trade grab + exchange cards
+                assert!(game.action(None, action2).is_ok());
+                assert_eq!(game.players[1].cards.len(), 2);
+                assert_eq!(game.players[0].cards.len(), 2);
+                assert!(game.players[0].cards.contains(&Card::Ace));
+                assert!(game.players[0].cards.contains(&Card::Three));
+                assert!(game.players[1].cards.contains(&Card::Two));
+                assert!(game.players[1].cards.contains(&Card::Four));
+                assert!(!game.trading_phase);
+            }
+
+            #[test]
+            fn trade_grab_fails_outside_trading_phase() {
+                let mut game = Game::new(GameVariant::FreeForAll(3));
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Ace];
+                game.players[2].cards = vec![Card::Seven];
+
+                let action = Action {
+                    player: game.players[0].color,
+                    card: None,
+                    action: ActionKind::TradeGrab { target_card: 0 },
+                };
+
+                assert!(game.action_trade_grab(0, action).is_err());
+            }
+
+            #[test]
+            fn trade_grab_fails_if_card_is_present() {
+                let mut game = Game::new(GameVariant::FreeForAll(3));
+                game.trading_phase = true;
+
+                game.players[0].cards = vec![Card::Ace];
+                game.players[2].cards = vec![Card::Seven];
+
+                let action = Action {
+                    player: game.players[0].color,
+                    card: Some(Card::Ace),
+                    action: ActionKind::TradeGrab { target_card: 0 },
+                };
+
+                assert!(game.action_trade_grab(0, action).is_err());
+            }
+
+            #[test]
+            fn trade_grab_not_allowed_in_team_games() {
+                let mut game = Game::new(GameVariant::TwoVsTwo);
+                game.trading_phase = true;
+
+                game.players[0].cards = vec![Card::Ace];
+                game.players[1].cards = vec![Card::King];
+
+                let action = Action {
+                    player: game.players[0].color,
+                    card: None,
+                    action: ActionKind::TradeGrab { target_card: 0 },
+                };
+
+                assert!(game.action_trade_grab(0, action).is_err());
+            }
+
+            #[test]
+            fn trade_grab_fails_with_invalid_card_index() {
+                let mut game = Game::new(GameVariant::FreeForAll(3));
+                game.trading_phase = true;
+
+                game.players[0].cards = vec![Card::Ace];
+                game.players[2].cards = vec![Card::Seven];
+
+                let action = Action {
+                    player: game.players[0].color,
+                    card: None,
+                    action: ActionKind::TradeGrab { target_card: 5 },
+                };
+
+                assert!(game.action_trade_grab(0, action).is_err());
+            }
+
+            #[test]
+            fn trade_grab_creates_correct_history_entry() {
+                let mut game = Game::new(GameVariant::FreeForAll(3));
+                game.trading_phase = true;
+
+                game.players[0].cards = vec![Card::Ace];
+                game.players[2].cards = vec![Card::Seven];
+
+                let action = Action {
+                    player: game.players[0].color,
+                    card: None,
+                    action: ActionKind::TradeGrab { target_card: 0 },
+                };
+
+                game.action_trade_grab(0, action).unwrap();
+
+                let entry = game.history.last().unwrap();
+
+                assert_eq!(entry.grabbed_from_player, Some(2));
+                assert_eq!(entry.grabbed_card, Some(Card::Seven));
+                assert_eq!(entry.grabbed_card_index, Some(0));
+                assert_eq!(entry.trade_buffer_before.len(), 0);
             }
         }
     }    
