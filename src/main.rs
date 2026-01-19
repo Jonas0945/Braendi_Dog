@@ -1,10 +1,10 @@
 //use anyhow::Ok;
-use braendi_dog::{Game, DogGame, Action,net, game::game::GameVariant, render};
+use braendi_dog::{Game, DogGame, Action, game::game::GameVariant, render};
 use std::io::{self, Write};
 use std::fs::OpenOptions;
 use std::str::FromStr;
 
-/*
+
 fn select_game_variant() -> GameVariant {
     loop {
         println!("Spielvariante auswählen:");
@@ -119,7 +119,9 @@ fn main() {
             break;
         }
     }
-}*/
+}
+
+/*
 # [tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>>{
 
@@ -128,4 +130,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
 );
     net::client::starte_client("127.0.0.1:8080").await?;
     Ok(())
-}
+}*/

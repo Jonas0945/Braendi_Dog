@@ -11,3 +11,4 @@ pub mod history;
 pub use game::{Game, DogGame};
 pub use color::Color;
 pub use piece::Piece;
+pub use self::game::*;

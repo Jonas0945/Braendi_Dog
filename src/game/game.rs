@@ -1,3 +1,6 @@
+use serde::Deserialize;
+use serde::Serialize;
+
 use super::piece::*;
 use super::action::*;
 use super::color::*;
@@ -9,7 +12,7 @@ use super::history::*;
 
 const CARDS_PER_ROUND: [u8;5] = [6,5,4,3,2];
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum GameVariant {
     TwoVsTwo,
     ThreeVsThree,
