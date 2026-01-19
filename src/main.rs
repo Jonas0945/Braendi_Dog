@@ -3,6 +3,7 @@ use braendi_dog::{Game, DogGame, Action,net, game::game::GameVariant, render};
 use std::io::{self, Write};
 use std::fs::OpenOptions;
 use std::str::FromStr;
+
 /*
 fn select_game_variant() -> GameVariant {
     loop {
