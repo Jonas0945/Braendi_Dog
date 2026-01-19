@@ -1,6 +1,6 @@
 pub mod game;
 pub mod ui;
-
+pub mod net;
 pub use game::game::{Game, DogGame};
 pub use game::color::Color;
 pub use game::piece::Piece;
