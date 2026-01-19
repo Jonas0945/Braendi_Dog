@@ -915,7 +915,10 @@ impl Game {
         let moving_piece = self.board.check_tile(from)
             .ok_or("Invalid move: no piece found.")?;
 
-        let team_indices = self.teammate_indices(current_player_index);
+        let team_indices = match self.game_variant {
+            GameVariant::FreeForAll(n) => (0..n).collect(), // FFA: 7 can split-move every piece
+            _ => self.teammate_indices(current_player_index),
+        };
 
         // Ony team pieces can be moved
         if moving_piece.owner != current_player_index && !team_indices.contains(&moving_piece.owner) {
@@ -1318,7 +1321,8 @@ impl DogGame for Game {
 
         let entry_player_index = self.index_of_color(entry.action.player);
         let played_card = entry.action.card;
-        let played_card_index = entry.played_card_index.unwrap();
+        
+        let played_card_index = entry.played_card_index.unwrap_or(0);
 
         match entry.action.action {
             ActionKind::Place { .. }=> {
@@ -1439,7 +1443,7 @@ impl DogGame for Game {
                     ));
 
                     // Reverse trade
-                    for (from, to, card) in trades {
+                    for (_, to, card) in trades {
                         let pos = self.players[to]
                             .cards
                             .iter()
@@ -1447,12 +1451,22 @@ impl DogGame for Game {
                             .expect("Traded card must exist in recipient hand");
 
                         self.players[to].cards.remove(pos);
-                        self.players[from].cards.push(card);
                     }
 
                     self.trading_phase = true;
 
                 }
+
+
+                    let grabbed_from_player = entry.grabbed_from_player.unwrap();
+                    let grabbed_card_index = entry.grabbed_card_index.unwrap();
+                    let grabbed_card = entry.grabbed_card.unwrap();
+
+                    self.players[grabbed_from_player].cards
+                        .insert(grabbed_card_index, grabbed_card);
+
+
+
 
                 self.trade_buffer = entry.trade_buffer_before;
                 self.current_player_index = entry_player_index;
@@ -3883,6 +3897,49 @@ mod tests {
 
                 assert!(game.action(Some(Card::Seven), action).is_err());
             }
+        
+            #[test]
+            fn split_in_ffa_can_move_opponents_piece() {
+                let mut game = Game::new_free_for_all(2);
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Seven];
+
+                game.board.tiles[16] = Some(Piece {
+                    owner: 1,
+                    left_start: false,
+                });
+
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Split { from: 16, to: 23 },
+                    card: Some(Card::Seven),
+                };
+
+                assert!(game.action(Some(Card::Seven), action).is_ok());
+                assert_eq!(game.board.tiles[23].unwrap().left_start, true);
+            }
+
+            #[test]
+            fn split_in_ffa_can_move_opponents_piece_in_house() {
+                let mut game = Game::new_free_for_all(2);
+                game.trading_phase = false;
+
+                game.players[0].cards = vec![Card::Seven];
+
+                game.board.tiles[16] = Some(Piece {
+                    owner: 1,
+                    left_start: true,
+                });
+
+                let action = Action {
+                    player: Color::Red,
+                    action: ActionKind::Split { from: 16, to: 39 },
+                    card: Some(Card::Seven),
+                };
+
+                assert!(game.action(Some(Card::Seven), action).is_ok());
+            }
         }
 
         mod action_trade_tests {
@@ -5098,6 +5155,7 @@ mod tests {
 
             mod undo_trade_tests {
                 use super::*;
+
                 #[test]
                 fn undo_trade_basic() {
                     let mut game = Game::new(GameVariant::TwoVsTwo);
@@ -5332,6 +5390,94 @@ mod tests {
                     assert_eq!(game.history.len(), history_len_before);
                 }
             }
+            
+            mod undo_trade_grab_tests {
+                use super::*;
+
+                #[test]
+                fn undo_trade_grab_basic() {
+                    let mut game = Game::new(GameVariant::FreeForAll(2));
+                    game.trading_phase = true;
+
+                    game.players[0].cards = vec![Card::Ace, Card::Two];
+                    game.players[1].cards = vec![Card::Three, Card::Four];
+
+                    let action = Action {
+                        player: game.players[0].color,
+                        action: ActionKind::TradeGrab { target_card: 0 },
+                        card: None,
+                    };
+
+                    assert!(game.action(None, action).is_ok());
+                    assert_eq!(game.players[0].cards.len(), 2);
+                    assert_eq!(game.players[1].cards.len(), 1);
+                    assert_eq!(game.trade_buffer.len(), 1);
+                    assert_eq!(game.trade_buffer, [(1, 0, Card::Three)]);
+
+                    assert!(game.undo_action().is_ok());
+                    assert_eq!(game.players[0].cards.len(), 2);
+                    assert_eq!(game.players[1].cards.len(), 2);
+                    assert!(game.trade_buffer.is_empty());
+
+                    assert_eq!(game.players[1].cards, vec![Card::Three, Card::Four]);
+                    assert_eq!(game.trade_buffer.len(), 0);
+                    assert_eq!(game.current_player_index, 0);
+                }
+
+                #[test]
+                fn undo_trade_grab_full() {
+                    let mut game = Game::new(GameVariant::FreeForAll(2));
+                    game.trading_phase = true;
+
+                    game.players[0].cards = vec![Card::Ace, Card::Two];
+                    game.players[1].cards = vec![Card::Three, Card::Four];
+
+                    let action1 = Action {
+                        player: game.players[0].color,
+                        action: ActionKind::TradeGrab { target_card: 0 },
+                        card: None,
+                    };
+
+                    let action2 = Action {
+                        player: game.players[1].color,
+                        action: ActionKind::TradeGrab { target_card: 0 },
+                        card: None,
+                    };
+
+                    assert!(game.action(None, action1).is_ok());
+                    assert_eq!(game.players[0].cards.len(), 2);
+                    assert_eq!(game.players[1].cards.len(), 1);
+                    assert_eq!(game.trade_buffer.len(), 1);
+                    assert_eq!(game.trade_buffer, [(1, 0, Card::Three)]);
+
+                    assert!(game.action(None, action2).is_ok());
+                    assert_eq!(game.players[0].cards.len(), 2);
+                    assert_eq!(game.players[1].cards.len(), 2);
+                    assert_eq!(game.trade_buffer.len(), 0);
+                    assert_eq!(game.players[0].cards, vec![Card::Two, Card::Three]);
+                    assert_eq!(game.players[1].cards, vec![Card::Four, Card::Ace]);
+
+                    // First undo
+                    assert!(game.undo_action().is_ok());
+                    assert_eq!(game.players[0].cards.len(), 2);
+                    assert_eq!(game.players[1].cards.len(), 1);
+                    assert_eq!(game.trade_buffer, [(1, 0, Card::Three)]);
+
+                    // Second undo
+                    assert!(game.undo_action().is_ok());
+                    assert_eq!(game.players[0].cards.len(), 2);
+                    assert_eq!(game.players[1].cards.len(), 2);
+                    assert!(game.trade_buffer.is_empty());
+
+                    assert_eq!(game.players[1].cards, vec![Card::Three, Card::Four]);
+                    assert_eq!(game.trade_buffer.len(), 0);
+                    assert_eq!(game.current_player_index, 0);
+                }
+
+
+            }
+        
+            
         }
 
         mod undo_turn_tests {
