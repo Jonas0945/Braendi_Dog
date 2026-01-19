@@ -509,6 +509,24 @@ impl Game {
         false
     }
 
+    pub fn can_piece_move_from_to(&self, from: usize, to: usize, backward: bool) -> bool {
+        let piece = self.board.tiles[from].as_ref().unwrap();
+
+        let distance = if backward {
+            self.board.distance_between(to, from, piece.owner)
+        } else {
+            self.board.distance_between(from, to, piece.owner)
+        };
+
+        let Some(_distance) = distance else {return false};
+
+        if let Some(path) = self.board.passed_tiles(from, to, piece.owner, backward) {
+            self.board.is_path_free(&path)
+        } else {
+            false
+        }
+    }
+
     fn action_place(&mut self, player_index: usize, _action:Action) -> Result<(), &'static str> {
 
         let ActionKind::Place { target_player } = _action.action else {
