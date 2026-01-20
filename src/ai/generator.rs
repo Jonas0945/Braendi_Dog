@@ -13,85 +13,16 @@ pub fn generate_all_legal_actions(game: &Game) -> Vec<Action> {
         .filter(|c| c.is_move_card())
         .collect();*/
 
-    // Collect trade actions 
+    // Collect & return trade actions 
     if game.trading_phase {
         total_actions.extend(collect_trade_actions(game));
 
         return total_actions;
     }
 
-    // Split only options
-    if let Some(split_rest) = game.split_rest {
-
-        match game.game_variant {
-            GameVariant::FreeForAll(_) => {
-                for (from_index, tile) in game.board.tiles.iter().enumerate() {
-                    let Some(piece) = tile else { continue };
-
-                    for to_index in 0..game.board.tiles.len() {
-                            
-                        let Some(distance) = game.board
-                            .distance_between(from_index, to_index, piece.owner)
-                        
-                        else {
-                            continue
-                        };
-
-                        if distance == 0 || distance > split_rest {
-                            continue;
-                        }
-
-                        if !game.can_piece_move_from_to(from_index, to_index, false) {
-                            continue;
-                        }
-
-                        let action = Action {
-                            player: player_color,
-                            card: Some(Card::Seven),
-                            action: ActionKind::Split { from: from_index, to: to_index },
-                        };
-
-                        total_actions.push(action);
-                    }
-                }
-            }
-            _ => {
-                let mut allowed_owners = game.teammate_indices(player_index);
-                allowed_owners.push(player_index);
-
-                for (from_index, tile) in game.board.tiles.iter().enumerate() {
-                    let Some(piece) = tile else { continue };
-
-                    if !allowed_owners.contains(&piece.owner) {
-                        continue
-                    };
-
-                    for to_index in 0..game.board.tiles.len() {
-                        let Some(distance) = game.board
-                            .distance_between(from_index, to_index, piece.owner)
-                        else {
-                            continue
-                        };
-
-                        if distance == 0 || distance > split_rest {
-                            continue;
-                        }
-
-                        if !game.can_piece_move_from_to(from_index, to_index, false) {
-                            continue;
-                        }
-
-                        let action = Action {
-                            player: player_color,
-                            card: Some(Card::Seven),
-                            action: ActionKind::Split { from: from_index, to: to_index },
-                        };
-
-                        total_actions.push(action);
-                    }
-                }
-            }
-        }
+    // Collect & return split actions while split_rest is active 
+    if game.split_rest.is_some() {
+        total_actions.extend(collect_split_actions(game));
 
         return total_actions;
     }
@@ -238,9 +169,74 @@ pub fn collect_trade_actions(game: &Game) -> Vec<Action> {
     trade_actions
 }
 
+pub fn collect_split_actions(game: &Game) -> Vec<Action> {
+    let mut split_actions = Vec::new();
+    let split_rest = game.split_rest.unwrap_or(7);
+
+    let player_color = game.current_player().color;
+    let player_index = game.current_player_index;
+
+    let split_cards: Vec<Card> = game.current_player().cards
+        .iter()
+        .cloned()
+        .filter(|c| c == &Card::Seven)
+        .collect();
+
+    let allowed_owners: Vec<usize> = match game.game_variant {
+        GameVariant::FreeForAll(_) => (0..game.players.len()).collect(),
+        _ => {
+            let mut team_owners = game.teammate_indices(player_index);
+            team_owners.push(player_index);
+            team_owners
+        }
+    };
+
+    for _card in split_cards {
+        for (from_index, tile) in game.board.tiles.iter().enumerate() {
+            let Some(piece) = tile else { continue };
+
+            if !allowed_owners.contains(&piece.owner) {
+                continue;
+            }
+
+            let range = match piece.left_start {
+                false => game.board.ring_size,
+                true => game.board.tiles.len()
+            };      
+
+            for to_index in 0..range {
+                let Some(distance) = game.board.distance_between(from_index, to_index, piece.owner) else {
+                    continue;
+                };
+
+                if distance == 0 || distance > split_rest {
+                    continue;
+                }
+
+                if !game.can_piece_move_from_to(from_index, to_index, false) {
+                    continue;
+                }
+
+                let action = Action {
+                    player: player_color,
+                    card: Some(Card::Seven),
+                    action: ActionKind::Split { from: from_index, to: to_index },
+                };
+
+                split_actions.push(action);
+            }
+        }   
+    }
+    
+
+    split_actions
+
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::piece::Piece;
 
     mod collect_place_tests {
         use crate::Piece;
@@ -525,6 +521,184 @@ mod tests {
 
             let actions = collect_trade_actions(&game);
             assert_eq!(actions.len(), 0);
+        }
+    }
+
+    mod collect_split_tests {
+        use super::*;
+
+        #[test]
+        fn ffa_two_pieces_move_only_ring() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Seven];
+
+            let actions = collect_split_actions(&game);
+
+            assert_eq!(actions.len(), 14);
+        }
+
+        #[test]
+        fn ffa_two_piece_move_left_start_different() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Seven];
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true }); // now has 11 Options (7 ring + 4 in-house)
+
+            let actions = collect_split_actions(&game);
+
+            assert_eq!(actions.len(), 18); // 11 + 7
+        }
+
+        #[test]
+        fn ffa_two_pieces_move_with_split_rest() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+            game.split_rest = Some(4);
+
+            game.players[0].cards = vec![Card::Seven];
+
+            let actions = collect_split_actions(&game);
+
+            assert_eq!(actions.len(), 8);
+        }
+
+        #[test]
+        fn ffa_two_pieces_move_with_split_rest_and_blocking_piece() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+            game.split_rest = Some(4);
+
+            game.players[0].cards = vec![Card::Seven];
+            game.board.tiles[1] = Some(Piece { owner: 0, left_start: false });
+
+            let actions = collect_split_actions(&game);
+
+            assert_eq!(actions.len(), 8);
+        }
+
+        #[test]
+        fn ffa_three_pieces_move_with_split_rest() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+            game.split_rest = Some(4);
+
+            game.players[0].cards = vec![Card::Seven];
+            game.board.tiles[1] = Some(Piece { owner: 0, left_start: true });
+
+            let actions = collect_split_actions(&game);
+
+            assert_eq!(actions.len(), 12);
+        }
+
+        #[test]
+        fn no_split_without_seven_card() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Ace];
+
+            let actions = collect_split_actions(&game);
+
+            assert!(actions.is_empty());
+        }
+
+        #[test]
+        fn multiple_sevens_duplicate_actions() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+            game.players[0].cards = vec![Card::Seven, Card::Seven];
+
+            let actions = collect_split_actions(&game);
+
+            assert_eq!(actions.len(), 28);
+        }
+
+        #[test]
+        fn all_actions_are_valid_splits() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+            let actions = collect_split_actions(&game);
+
+            for action in actions {
+                assert_eq!(action.card, Some(Card::Seven));
+
+                match action.action {
+                    ActionKind::Split { from, to } => {
+                        assert_ne!(from, to);
+                    }
+                    _ => panic!("Expected Split action"),
+                }
+            }
+        }
+
+        #[test]
+        fn team_mode_does_not_move_enemy_pieces() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Seven];
+
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
+
+            game.board.tiles[5] = Some(Piece {
+                owner: 1,
+                left_start: false,
+            });
+
+            game.board.tiles[7] = Some(Piece {
+                owner: 2,
+                left_start: false,
+            });
+
+            let actions = collect_split_actions(&game);
+
+            for action in actions {
+                if let ActionKind::Split { from, .. } = action.action {
+                    let piece = game.board.tiles[from].as_ref().unwrap();
+                    assert!(piece.owner == 0 || piece.owner == 2);
+                }
+            }
+        }
+
+        #[test]
+        fn split_rest_zero_produces_no_actions() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Seven];
+            game.split_rest = Some(0);
+
+            let actions = collect_split_actions(&game);
+
+            assert!(actions.is_empty());
+        }
+
+        #[test]
+        fn fully_blocked_piece_has_no_split_actions() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Seven];
+
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
+
+            game.board.tiles[1] = Some(Piece {
+                owner: 1,
+                left_start: false,
+            });
+
+            let actions = collect_split_actions(&game);
+
+            assert!(actions.is_empty());
         }
     }
 }
