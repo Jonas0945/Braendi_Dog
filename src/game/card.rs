@@ -43,4 +43,12 @@ impl Card {
             Card::Joker => 0,
         }
     }
+
+    pub fn is_place_card(&self) -> bool {
+        matches!(self, Card::Ace | Card:: King | Card::Joker)
+    }
+
+    pub fn is_move_card(&self) -> bool {
+        !matches!(self, Card::Jack | Card::Seven)
+    }
 }

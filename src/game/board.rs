@@ -36,6 +36,17 @@ impl Board {
         player_index * 16
     }
 
+    pub fn is_occupied(&self, p: Point) -> bool {
+        self.tiles[p].is_some()
+    }
+
+    pub fn is_blocked (&self, p: Point) -> bool {
+        matches!(
+            self.tiles[p],
+            Some(Piece { left_start: false, .. })
+        )
+    }
+
     pub fn house_gateway(&self, player_index: usize) -> Point {
         self.ring_size + player_index * HOUSE_SIZE
     }
