@@ -7,51 +7,15 @@ pub fn generate_all_legal_actions(game: &Game) -> Vec<Action> {
     let player_color = game.current_player().color;
     let player_index = game.current_player_index;
 
-    let place_cards: Vec<Card> = game.current_player().cards
-        .iter()
-        .cloned()
-        .filter(|c| c.is_place_card())
-        .collect();
-
     /*let move_cards: Vec<Card> = game.current_player().cards
         .iter()
         .cloned()
         .filter(|c| c.is_move_card())
         .collect();*/
 
-    // Trade phase moves 
+    // Collect trade actions 
     if game.trading_phase {
-        match game.game_variant {
-            GameVariant::FreeForAll(_) => {
-                for target_index in 0..game.players.len() {
-                    if target_index == player_index {
-                        continue;
-                    }
-
-                    // Trade grab every possible card of target player
-                    for card_index in 0..game.players[target_index].cards.len() {
-                        let action = Action {
-                            player: player_color,
-                            card: None,
-                            action: crate::ActionKind::TradeGrab { target_card: card_index }
-                        };
-
-                        total_actions.push(action);
-                    }
-                }
-            },
-            _ => {
-                for card in &game.current_player().cards {
-                    let action = Action {
-                        player: player_color,
-                        card: Some(*card),
-                        action: ActionKind::Trade,
-                    };
-
-                    total_actions.push(action);
-                }
-            },
-        }
+        total_actions.extend(collect_trade_actions(game));
 
         return total_actions;
     }
@@ -132,39 +96,8 @@ pub fn generate_all_legal_actions(game: &Game) -> Vec<Action> {
         return total_actions;
     }
 
-    // Collect every normal action
-
-    // Place own pieces
-    if game.current_player().pieces_to_place != 0 {
-        let start_field = game.board.start_field(player_index) as Point;
-
-        if !game.board.is_blocked(start_field) {
-            for card in &place_cards {
-                total_actions.push(Action { 
-                    player: player_color, 
-                    card: Some(*card), 
-                    action: ActionKind::Place { target_player: player_index } 
-                });
-            }
-        }
-    }
-
-    //Place team pieces
-    if game.current_player().pieces_in_house == 4 {
-        for teammate in game.teammate_indices(player_index) {
-            let teammate_start_field = game.board.start_field(teammate);
-
-            if !game.board.is_blocked(teammate_start_field) {
-                for card in &place_cards {
-                    total_actions.push(Action { 
-                        player: player_color, 
-                        card: Some(*card), 
-                        action: ActionKind::Place { target_player: teammate } 
-                    });    
-                }
-            }
-        }
-    }
+    // Collect place actions
+    total_actions.extend(collect_place_actions(game));
 
     // Move collection
     /*for card in &move_cards {
@@ -261,6 +194,48 @@ pub fn collect_place_actions(game: &Game) -> Vec<Action> {
     }
 
     place_actions
+}
+
+pub fn collect_trade_actions(game: &Game) -> Vec<Action> {
+    let mut trade_actions = Vec::new();
+
+    let player_color = game.current_player().color;
+    let player_index = game.current_player_index;
+
+    match game.game_variant {
+        GameVariant::FreeForAll(_) => {
+            for target_index in 0..game.players.len() {
+                if target_index == player_index {
+                    continue;
+                }
+
+                // Trade grab every possible card of target player
+                for card_index in 0..game.players[target_index].cards.len() {
+                    let action = Action {
+                        player: player_color,
+                        card: None,
+                        action: crate::ActionKind::TradeGrab { target_card: card_index }
+                    };
+
+                    trade_actions.push(action);
+                }
+            }
+        },
+
+        _ => {
+            for card in &game.current_player().cards {
+                let action = Action {
+                    player: player_color,
+                    card: Some(*card),
+                    action: ActionKind::Trade,
+                };
+
+                trade_actions.push(action);
+            }
+        },
+    }
+
+    trade_actions
 }
 
 #[cfg(test)]
@@ -444,5 +419,112 @@ mod tests {
 
             assert_eq!(actions.len(), 1);
         }    
+    }
+
+    mod collect_trade_tests {
+        use super::*;
+
+        #[test]
+        fn ffa_single_opponent_single_card() {
+            let mut game = Game::new(GameVariant::FreeForAll(4));
+            game.trading_phase = true;
+
+            game.players[3].cards = vec![Card::Ace];
+
+            let actions = collect_trade_actions(&game);
+
+            assert_eq!(actions.len(), 1);
+            assert_eq!(actions[0].player, game.player_by_index(0).color);
+            assert_eq!(actions[0].card, None);
+
+            match actions[0].action {
+                ActionKind::TradeGrab { target_card } => assert_eq!(target_card, 0),
+                _ => panic!("Expected TradeGrab"),
+            }
+        }
+
+        #[test]
+        fn ffa_multiple_opponents_multiple_cards() {
+            let mut game = Game::new(GameVariant::FreeForAll(3));
+            game.trading_phase = true;
+
+            game.players[1].cards = vec![Card::Ace, Card::Two];
+            game.players[2].cards = vec![Card::Three];
+
+            let actions = collect_trade_actions(&game);
+
+            assert_eq!(actions.len(), 3);
+
+            let expected = vec![
+                (1, 0),
+                (1, 1),
+                (2, 0),
+            ];
+
+            for (i, action) in actions.iter().enumerate() {
+                assert_eq!(action.player, game.player_by_index(0).color);
+                assert_eq!(action.card, None);
+
+                match action.action {
+                    ActionKind::TradeGrab { target_card } => {
+                        assert_eq!(target_card, expected[i].1);
+                    }
+                    _ => panic!("Expected TradeGrab"),
+                }
+            }
+        }
+
+        #[test]
+        fn team_normal_single_card() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+            game.trading_phase = true;
+
+            game.players[0].cards = vec![Card::Ace];
+
+            let actions = collect_trade_actions(&game);
+
+            assert_eq!(actions.len(), 1);
+
+            let action = &actions[0];
+            assert_eq!(action.player, game.player_by_index(0).color);
+            assert_eq!(action.card, Some(Card::Ace));
+
+            match action.action {
+                ActionKind::Trade => {},
+                _ => panic!("Expected Trade"),
+            }
+        }
+
+        #[test]
+        fn team_normal_multiple_cards() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+            game.trading_phase = true;
+
+            game.players[0].cards = vec![Card::Ace, Card::Joker];
+
+            let actions = collect_trade_actions(&game);
+
+            assert_eq!(actions.len(), 2);
+
+            
+            assert_eq!(actions[0].player, game.player_by_index(0).color);
+            assert_eq!(actions[0].card, Some(Card::Ace));
+            if let ActionKind::Trade = actions[0].action {} else { panic!("Expected Trade"); }
+
+            assert_eq!(actions[1].player, game.player_by_index(0).color);
+            assert_eq!(actions[1].card, Some(Card::Joker));
+            if let ActionKind::Trade = actions[1].action {} else { panic!("Expected Trade"); }
+        }
+
+        #[test]
+        fn team_normal_no_cards() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+            game.trading_phase = true;
+
+            game.players[0].cards = vec![];
+
+            let actions = collect_trade_actions(&game);
+            assert_eq!(actions.len(), 0);
+        }
     }
 }
