@@ -66,6 +66,14 @@ pub fn generate_all_legal_actions(game: &Game) -> Vec<Action> {
         }
     }*/
 
+    // Collect grab actions
+    match game.game_variant {
+        GameVariant::FreeForAll(_) => {
+            total_actions.extend(collect_grab_actions(game));
+        },
+        _ => {},
+    }
+
     // Remove option = no other action possible 
     if total_actions.is_empty() {
         for card in &game.current_player().cards {
@@ -179,7 +187,7 @@ pub fn collect_split_actions(game: &Game) -> Vec<Action> {
     let split_cards: Vec<Card> = game.current_player().cards
         .iter()
         .cloned()
-        .filter(|c| c == &Card::Seven)
+        .filter(|c| *c == Card::Seven)
         .collect();
 
     let allowed_owners: Vec<usize> = match game.game_variant {
@@ -231,6 +239,42 @@ pub fn collect_split_actions(game: &Game) -> Vec<Action> {
 
     split_actions
 
+}
+
+pub fn collect_grab_actions(game: &Game) -> Vec<Action> {
+    let mut grab_actions = Vec::new();
+
+    let player_color = game.current_player().color;
+    let player_index = game.current_player_index;
+
+    let grab_cards: Vec<Card> = game.current_player().cards
+        .iter()
+        .cloned()
+        .filter(|c| *c == Card::Two)
+        .collect();
+
+    for grab_card in grab_cards {
+        for (target_index, target_player) in game.players.iter().enumerate() {
+            if target_index == player_index {
+                continue
+            };
+
+            let target_color = target_player.color;
+
+            for target_card_index in 0..target_player.cards.len() {
+                grab_actions.push(Action { 
+                    player: player_color, 
+                    card: Some(grab_card), 
+                    action: ActionKind::Grab { 
+                        target_player: target_color,
+                        target_card: target_card_index,    
+                    }, 
+                });
+            }
+        }
+    }
+
+    grab_actions
 }
 
 #[cfg(test)]
@@ -699,6 +743,127 @@ mod tests {
             let actions = collect_split_actions(&game);
 
             assert!(actions.is_empty());
+        }
+    }
+
+    mod collect_grab_tests {
+        use super::*;
+
+        #[test]
+        fn no_grab_without_two_card() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Ace];
+
+            let actions = collect_grab_actions(&game);
+
+            assert!(actions.is_empty());
+        }
+
+        #[test]
+        fn grab_single_card_from_single_opponent() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Two];
+
+            game.players[1].cards = vec![Card::Ace];
+
+            let actions = collect_grab_actions(&game);
+
+            assert_eq!(actions.len(), 1);
+
+            let action = &actions[0];
+            assert_eq!(action.player, game.players[0].color);
+            assert_eq!(action.card, Some(Card::Two));
+
+            match action.action {
+                ActionKind::Grab { target_player, target_card } => {
+                    assert_eq!(target_player, game.players[1].color);
+                    assert_eq!(target_card, 0);
+                }
+                _ => panic!("Expected Grab action"),
+            }
+        }
+
+        #[test]
+        fn grab_multiple_cards_from_one_opponent() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Two];
+            game.players[1].cards = vec![Card::Ace, Card::King, Card::Queen];
+
+            let actions = collect_grab_actions(&game);
+
+            assert_eq!(actions.len(), 3);
+
+            for action in actions {
+                match action.action {
+                    ActionKind::Grab { target_player, target_card } => {
+                        assert_eq!(target_player, game.players[1].color);
+                        assert!(target_card < 3);
+                    }
+                    _ => panic!("Expected Grab action"),
+                }
+            }
+        }
+
+        #[test]
+        fn grab_from_multiple_opponents() {
+            let mut game = Game::new(GameVariant::FreeForAll(3));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Two];
+
+            game.players[1].cards = vec![Card::Ace];
+            game.players[2].cards = vec![Card::King, Card::Queen];
+
+            let actions = collect_grab_actions(&game);
+
+            assert_eq!(actions.len(), 3);
+
+            let mut targets = Vec::new();
+
+            for action in actions {
+                if let ActionKind::Grab { target_player, .. } = action.action {
+                    targets.push(target_player);
+                }
+            }
+
+            assert!(targets.contains(&game.players[1].color));
+            assert!(targets.contains(&game.players[2].color));
+        }
+
+        #[test]
+        fn multiple_twos_duplicate_grab_actions() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Two, Card::Two];
+            game.players[1].cards = vec![Card::Ace, Card::King];
+
+            let actions = collect_grab_actions(&game);
+
+            // 2 Twos × 2 target cards
+            assert_eq!(actions.len(), 4);
+        }
+
+        #[test]
+        fn grab_never_targets_self() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+
+            game.players[0].cards = vec![Card::Two];
+            game.players[0].cards.push(Card::Ace);
+
+            let actions = collect_grab_actions(&game);
+
+            for action in actions {
+                if let ActionKind::Grab { target_player, .. } = action.action {
+                    assert_ne!(target_player, game.players[0].color);
+                }
+            }
         }
     }
 }
