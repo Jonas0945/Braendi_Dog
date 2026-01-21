@@ -6,22 +6,22 @@ pub enum Card {
 }
 
 impl Card {
-    pub fn possible_distances(&self) -> Option<Vec<u8>> {
+    pub fn possible_distances(&self) -> Vec<u8> {
         match self {
-            Card::Ace   => Some(vec![1,11]),
-            Card::Two   => Some(vec![2]),
-            Card::Three => Some(vec![3]),
-            Card::Four  => Some(vec![4]),
-            Card::Five  => Some(vec![5]),
-            Card::Six   => Some(vec![6]),
-            Card::Seven => Some(vec![7]),
-            Card::Eight => Some(vec![8]),
-            Card::Nine  => Some(vec![9]),
-            Card::Ten   => Some(vec![10]),
-            Card::Jack  => None,
-            Card::Queen => Some(vec![12]),
-            Card::King  => Some(vec![13]),
-            Card::Joker => Some(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],)
+            Card::Ace   => vec![1,11],
+            Card::Two   => vec![2],
+            Card::Three => vec![3],
+            Card::Four  => vec![4],
+            Card::Five  => vec![5],
+            Card::Six   => vec![6],
+            Card::Seven => vec![7],
+            Card::Eight => vec![8],
+            Card::Nine  => vec![9],
+            Card::Ten   => vec![10],
+            Card::Jack  => vec![],
+            Card::Queen => vec![12],
+            Card::King  => vec![13],
+            Card::Joker => vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
         }
     }
 
@@ -42,5 +42,25 @@ impl Card {
             Card::King => 13,
             Card::Joker => 0,
         }
+    }
+
+    pub fn is_place_card(&self) -> bool {
+        matches!(self, Card::Ace | Card:: King | Card::Joker)
+    }
+
+    pub fn is_forward_move_card(&self) -> bool {
+        !matches!(self, Card::Jack | Card::Seven)
+    }
+
+    pub fn is_backward_move_card(&self) -> bool {
+        matches!(self, Card::Four | Card::Joker)
+    }
+
+    pub fn allows_backward_move(&self) -> bool {
+        matches!(self, Card::Four | Card::Joker)
+    }
+
+    pub fn is_interchange_card(&self) -> bool {
+        matches!(self, Card::Jack | Card::Joker)
     }
 }

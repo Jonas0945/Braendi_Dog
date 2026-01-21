@@ -220,10 +220,7 @@ impl Game {
     }
 
     pub fn can_card_move(&self, _card: Card, forward: Option<u8>, backward: Option<u8>) -> bool {
-        let distances = match _card.possible_distances() {
-            Some(d) => d,
-            None => return false,
-        };
+        let distances = _card.possible_distances();
 
         let forward_ok = forward.map_or(false, |f| distances.contains(&f));
         let backward_ok = backward.map_or(false, |b| distances.contains(&b));
@@ -422,7 +419,7 @@ impl Game {
         }
 
         // Check if normal move is possible
-        let distances = card.possible_distances().unwrap_or_default();
+        let distances = card.possible_distances();
 
         for &from in &movable_pieces {
             for &dist in &distances {
@@ -483,7 +480,7 @@ impl Game {
             .count()
     }
 
-    fn can_piece_move_distance(&self, from: usize, dist: u8, backward: bool) -> bool {
+    pub fn can_piece_move_distance(&self, from: usize, dist: u8, backward: bool) -> bool {
         let piece = self.board.tiles[from].as_ref().unwrap();
 
         for to in 0..self.board.tiles.len() {
@@ -507,6 +504,24 @@ impl Game {
         }
 
         false
+    }
+
+    pub fn can_piece_move_from_to(&self, from: usize, to: usize, backward: bool) -> bool {
+        let piece = self.board.tiles[from].as_ref().unwrap();
+
+        let distance = if backward {
+            self.board.distance_between(to, from, piece.owner)
+        } else {
+            self.board.distance_between(from, to, piece.owner)
+        };
+
+        let Some(_distance) = distance else {return false};
+
+        if let Some(path) = self.board.passed_tiles(from, to, piece.owner, backward) {
+            self.board.is_path_free(&path)
+        } else {
+            false
+        }
     }
 
     fn action_place(&mut self, player_index: usize, _action:Action) -> Result<(), &'static str> {
