@@ -220,10 +220,7 @@ impl Game {
     }
 
     pub fn can_card_move(&self, _card: Card, forward: Option<u8>, backward: Option<u8>) -> bool {
-        let distances = match _card.possible_distances() {
-            Some(d) => d,
-            None => return false,
-        };
+        let distances = _card.possible_distances();
 
         let forward_ok = forward.map_or(false, |f| distances.contains(&f));
         let backward_ok = backward.map_or(false, |b| distances.contains(&b));
@@ -422,7 +419,7 @@ impl Game {
         }
 
         // Check if normal move is possible
-        let distances = card.possible_distances().unwrap_or_default();
+        let distances = card.possible_distances();
 
         for &from in &movable_pieces {
             for &dist in &distances {

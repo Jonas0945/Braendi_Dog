@@ -5,13 +5,6 @@ pub fn generate_all_legal_actions(game: &Game) -> Vec<Action> {
     let mut total_actions = Vec::new();
 
     let player_color = game.current_player().color;
-    let player_index = game.current_player_index;
-
-    /*let move_cards: Vec<Card> = game.current_player().cards
-        .iter()
-        .cloned()
-        .filter(|c| c.is_move_card())
-        .collect();*/
 
     // Collect & return trade actions 
     if game.trading_phase {
@@ -31,40 +24,11 @@ pub fn generate_all_legal_actions(game: &Game) -> Vec<Action> {
     total_actions.extend(collect_place_actions(game));
 
     // Move collection
-    /*for card in &move_cards {
-        for &dist in card.possible_distances().iter() {
-            for (from, tile) in game.board.tiles.iter().enumerate() {
-                let piece = match tile {
-                    Some(p) if game.can_control_piece(player_index, p.owner) => p, 
-                    _ => continue,
-                };
+    total_actions.extend(collect_forward_move_actions(game));
+    total_actions.extend(collect_backward_move_actions(game));
 
-
-                let can_forward = game.can_piece_move_distance(from, dist, false);
-                let can_backward = game.can_piece_move_distance(from, dist, true);
-
-                match card {
-                    Card::Four if !can_forward && !can_backward => continue,
-                    _ if !can_forward => continue,
-                    _ => {},
-                };
-
-                for to in 0..game.board.tiles.len() {
-                    let valid = game.board.distance_between(from, to, piece.owner) 
-                        == Some(dist);
-
-                        if !valid {
-                            continue
-                        };
-
-
-                }
-
-
-
-            }
-        }
-    }*/
+    // Split collection
+    total_actions.extend(collect_split_actions(game));
 
     // Collect grab actions
     match game.game_variant {
@@ -200,7 +164,7 @@ pub fn collect_split_actions(game: &Game) -> Vec<Action> {
     };
 
     for _card in split_cards {
-        for (from_index, tile) in game.board.tiles.iter().enumerate() {
+        for (from, tile) in game.board.tiles.iter().enumerate() {
             let Some(piece) = tile else { continue };
 
             if !allowed_owners.contains(&piece.owner) {
@@ -212,8 +176,8 @@ pub fn collect_split_actions(game: &Game) -> Vec<Action> {
                 true => game.board.tiles.len()
             };      
 
-            for to_index in 0..range {
-                let Some(distance) = game.board.distance_between(from_index, to_index, piece.owner) else {
+            for to in 0..range {
+                let Some(distance) = game.board.distance_between(from, to, piece.owner) else {
                     continue;
                 };
 
@@ -221,14 +185,14 @@ pub fn collect_split_actions(game: &Game) -> Vec<Action> {
                     continue;
                 }
 
-                if !game.can_piece_move_from_to(from_index, to_index, false) {
+                if !game.can_piece_move_from_to(from, to, false) {
                     continue;
                 }
 
                 let action = Action {
                     player: player_color,
                     card: Some(Card::Seven),
-                    action: ActionKind::Split { from: from_index, to: to_index },
+                    action: ActionKind::Split { from, to },
                 };
 
                 split_actions.push(action);
@@ -275,6 +239,102 @@ pub fn collect_grab_actions(game: &Game) -> Vec<Action> {
     }
 
     grab_actions
+}
+
+pub fn collect_forward_move_actions(game: &Game) -> Vec<Action> {
+    let mut forward_move_actions = Vec::new();
+
+    let player_color = game.current_player().color;
+    let player_index = game.current_player_index;
+
+    let forward_move_cards: Vec<Card> = game.current_player().cards
+        .iter()
+        .cloned()
+        .filter(|c| c.is_forward_move_card())
+        .collect();
+
+    for card in forward_move_cards {
+        for dist in card.possible_distances() {
+
+            for (from, tile) in game.board.tiles.iter().enumerate() {
+                let Some(piece) = tile else { continue };
+                if !game.can_control_piece(player_index, piece.owner) {
+                    continue;
+                }
+
+                if !game.can_piece_move_distance(from, dist, false) {
+                    continue;
+                }
+
+                let range = match piece.left_start {
+                    false => game.board.ring_size,
+                    true => game.board.tiles.len()
+                }; 
+
+                for to in 0..range {
+                    if game.board.distance_between(from, to, piece.owner) != Some(dist) {
+                        continue;
+                    }
+
+                    if !game.can_piece_move_from_to(from, to, false) {
+                        continue;
+                    }
+
+                    forward_move_actions.push(Action {
+                        player: player_color,
+                        card: Some(card),
+                        action: ActionKind::Move { from, to },
+                    });
+                }
+            }
+        }
+    }
+
+    forward_move_actions
+}
+
+pub fn collect_backward_move_actions(game: &Game) -> Vec<Action> {
+    let mut backward_move_actions = Vec::new();
+
+    let player_color = game.current_player().color;
+    let player_index = game.current_player_index;
+
+    let backward_move_cards: Vec<Card> = game.current_player().cards
+        .iter()
+        .cloned()
+        .filter(|c| c.is_backward_move_card())
+        .collect();
+
+    for card in backward_move_cards {
+        for (from, tile) in game.board.tiles.iter().enumerate() {
+
+            // Cannot move backwards in-house
+            if from >= game.board.ring_size {
+                continue;
+            }
+            
+            let Some(piece) = tile else { continue };
+            
+            if !game.can_control_piece(player_index, piece.owner) {
+                continue;
+            }
+
+            let distance = 4;
+            let to = (from + game.board.ring_size - distance as usize) % game.board.ring_size;
+
+            if !game.can_piece_move_from_to(from, to, true) {
+                continue;
+            }
+
+            backward_move_actions.push(Action {
+                player: player_color,
+                card: Some(card),
+                action: ActionKind::Move { from, to },
+            }); 
+        }
+    }
+
+    backward_move_actions
 }
 
 #[cfg(test)]
@@ -864,6 +924,218 @@ mod tests {
                     assert_ne!(target_player, game.players[0].color);
                 }
             }
+        }
+    }
+
+    mod collect_forward_move_tests {
+        use super::*;
+
+        #[test]
+        fn single_piece_single_move_card() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Ace];
+            game.board.tiles[0] = Some(Piece { 
+                owner: 0, 
+                left_start: false });
+
+            let actions = collect_forward_move_actions(&game);
+
+            assert!(actions.len() == 2);
+            assert_eq!(actions[0].player, game.current_player().color);
+            assert_eq!(actions[0].card, Some(Card::Ace));
+            assert!(matches!(actions[0].action, ActionKind::Move { from: 0, to: 1 }));
+            assert_eq!(actions[1].player, game.current_player().color);
+            assert_eq!(actions[1].card, Some(Card::Ace));
+            assert!(matches!(actions[1].action, ActionKind::Move { from: 0, to: 11 }));
+        }
+
+        #[test]
+        fn single_piece_left_start() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Ace];
+            game.board.tiles[0] = Some(Piece { 
+                owner: 0, 
+                left_start: true });
+
+            let actions = collect_forward_move_actions(&game);
+
+            assert!(actions.len() == 3);
+            assert_eq!(actions[0].player, game.current_player().color);
+            assert_eq!(actions[0].card, Some(Card::Ace));
+            assert!(matches!(actions[0].action, ActionKind::Move { from: 0, to: 1 }));
+            assert_eq!(actions[1].player, game.current_player().color);
+            assert_eq!(actions[1].card, Some(Card::Ace));
+            assert!(matches!(actions[1].action, ActionKind::Move { from: 0, to: 32 }));
+            assert_eq!(actions[2].player, game.current_player().color);
+            assert_eq!(actions[2].card, Some(Card::Ace));
+            assert!(matches!(actions[2].action, ActionKind::Move { from: 0, to: 11 }));
+        }
+
+        #[test]
+        fn multiple_pieces_multiple_distances() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+            game.players[0].cards = vec![Card::Two];
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
+            game.board.tiles[5] = Some(Piece { owner: 0, left_start: false });
+
+            let actions = collect_forward_move_actions(&game);
+
+            assert!(actions.len() == 2);
+            assert!(matches!(actions[0].action, ActionKind::Move { from: 0, to: 2 }));
+            assert!(matches!(actions[1].action, ActionKind::Move { from: 5, to: 7 }));
+        }
+
+        #[test]
+        fn blocked_field_no_action() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+            game.players[0].cards = vec![Card::Ace];
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
+            game.board.tiles[1] = Some(Piece { owner: 1, left_start: false });
+
+            let actions = collect_forward_move_actions(&game);
+
+            assert_eq!(actions.len(), 0);
+        }
+
+        #[test]
+        fn joker_can_move_every_distance() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+            game.players[0].cards = vec![Card::Joker];
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
+
+            let actions = collect_forward_move_actions(&game);
+
+            assert!(actions.len() == 13);
+            for act in &actions {
+                assert_eq!(act.card, Some(Card::Joker));
+            }
+        }
+
+        #[test]
+        fn only_own_pieces_movable() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+            game.players[0].cards = vec![Card::Ace];
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
+            game.board.tiles[12] = Some(Piece { owner: 1, left_start: false });
+
+            let actions = collect_forward_move_actions(&game);
+            assert!(actions.len() == 2);
+        }
+    }
+
+    mod collect_backward_move_tests {
+        use super::*;
+
+        #[test]
+        fn single_piece_single_move_card() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Four];
+            game.board.tiles[0] = Some(Piece { 
+                owner: 0, 
+                left_start: false });
+
+            let actions = collect_backward_move_actions(&game);
+
+            assert!(actions.len() == 1);
+            assert_eq!(actions[0].player, game.current_player().color);
+            assert_eq!(actions[0].card, Some(Card::Four));
+            assert!(matches!(actions[0].action, ActionKind::Move { from: 0, to: 28 }));
+        }
+
+        #[test]
+        fn multiple_pieces_single_move() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Joker];
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
+            game.board.tiles[5] = Some(Piece { owner: 0, left_start: false });
+
+            let actions = collect_backward_move_actions(&game);
+
+            assert_eq!(actions.len(), 2);
+            assert!(actions.iter().any(|a| matches!(a.action, ActionKind::Move { from: 0, to: 28 })));
+            assert!(actions.iter().any(|a| matches!(a.action, ActionKind::Move { from: 5, to: 1 })));
+        }
+
+        #[test]
+        fn blocked_backward_move() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Four];
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
+            game.board.tiles[28] = Some(Piece { owner: 1, left_start: false });
+
+            let actions = collect_backward_move_actions(&game);
+
+            assert_eq!(actions.len(), 0);
+        }
+
+        #[test]
+        fn left_start_backward_move() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Four];
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true });
+
+            let actions = collect_backward_move_actions(&game);
+
+            assert_eq!(actions.len(), 1);
+            assert!(matches!(actions[0].action, ActionKind::Move { from: 0, to: 28 }));
+        }
+
+        #[test]
+        fn single_move_multiple_cards() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Four, Card::Four];
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true });
+
+            let actions = collect_backward_move_actions(&game);
+
+            assert_eq!(actions.len(), 2);
+            assert!(matches!(actions[0].action, ActionKind::Move { from: 0, to: 28 }));
+        }
+
+        #[test]
+        fn joker_backward_moves() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Joker];
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
+
+            let actions = collect_backward_move_actions(&game);
+
+            assert_eq!(actions.len(), 1);
+            assert!(matches!(actions[0].action, ActionKind::Move { from: 0, to: 28 }));
+        }
+
+        #[test]
+        fn in_house_backward_move_not_allowed() {
+            let mut game = Game::new(GameVariant::FreeForAll(2));
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Four];
+            game.board.tiles[0] = None;
+            game.board.tiles[32] = Some(Piece { owner: 0, left_start: false }); // In-house
+
+            let actions = collect_backward_move_actions(&game);
+
+            assert_eq!(actions.len(), 0);
         }
     }
 }

@@ -186,7 +186,7 @@ impl Board {
         for &tile in path {
             if let Some(p) = &self.tiles[tile] {
                 if tile >= self.ring_size { return false; }
-                if !p.left_start { return false;}
+                if !p.left_start { return false; }
             }
         }
 
