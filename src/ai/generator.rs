@@ -30,6 +30,9 @@ pub fn generate_all_legal_actions(game: &Game) -> Vec<Action> {
     // Split collection
     total_actions.extend(collect_split_actions(game));
 
+    // Collect interchange actions
+    total_actions.extend(collect_interchange_actions(game));
+
     // Collect grab actions
     match game.game_variant {
         GameVariant::FreeForAll(_) => {
@@ -335,6 +338,69 @@ pub fn collect_backward_move_actions(game: &Game) -> Vec<Action> {
     }
 
     backward_move_actions
+}
+
+pub fn collect_interchange_actions(game: &Game) -> Vec<Action> {
+    let mut interchange_actions = Vec::new();
+
+    let player_color = game.current_player().color;
+    let player_index = game.current_player_index;
+
+    let interchange_cards: Vec<Card> = game.current_player().cards
+        .iter()
+        .cloned()
+        .filter(|c| c.is_interchange_card())
+        .collect();
+
+
+    for card in interchange_cards {
+        for (a_index, a_tile) in game.board.tiles.iter().enumerate() {
+            
+            if a_index >= game.board.ring_size {
+                continue;
+            }
+
+            let Some(a_piece) = a_tile else { continue };
+
+            if !a_piece.left_start {
+                continue;
+            }
+
+            if !game.can_control_piece(player_index, a_piece.owner) {
+                continue;
+            }
+
+            for (b_index, b_tile) in game.board.tiles.iter().enumerate() {
+                if a_index == b_index {
+                    continue;
+                }
+
+                if b_index >= game.board.ring_size {
+                    continue;
+                }
+
+                let Some(b_piece) = b_tile else { continue };
+
+                // Cannot interchange with identical owners
+                if a_piece.owner == b_piece.owner {
+                    continue;
+                }
+
+                if !b_piece.left_start {
+                    continue;
+                }
+
+                interchange_actions.push(Action {
+                    player: player_color,
+                    card: Some(card),
+                    action: ActionKind::Interchange { a: a_index, b: b_index },
+                });
+            }
+        }
+    }
+
+
+    interchange_actions
 }
 
 #[cfg(test)]
@@ -1136,6 +1202,118 @@ mod tests {
             let actions = collect_backward_move_actions(&game);
 
             assert_eq!(actions.len(), 0);
+        }
+    }
+
+    mod collect_interchange_tests {
+        use super::*;
+
+        #[test]
+        fn no_interchange_single_piece() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Jack];
+
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true });
+
+            let actions = collect_interchange_actions(&game);
+            assert_eq!(actions.len(), 0);
+        }
+
+        #[test]
+        fn interchange_with_teammate_and_opponent() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Jack];
+
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true }); 
+            game.board.tiles[4] = Some(Piece { owner: 2, left_start: true }); 
+            game.board.tiles[7] = Some(Piece { owner: 1, left_start: true }); 
+
+            let actions = collect_interchange_actions(&game);
+
+            assert_eq!(actions.len(), 2);
+            assert_eq!(actions[0].player, game.current_player().color);
+            assert_eq!(actions[0].card, Some(Card::Jack));
+            assert!(matches!(actions[0].action, ActionKind::Interchange { a: 0, b: 4 }));
+        }
+
+        #[test]
+        fn no_interchange_solely_own_pieces() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Jack];
+
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true }); 
+            game.board.tiles[4] = Some(Piece { owner: 0, left_start: true });
+
+            let actions = collect_interchange_actions(&game);
+
+            assert_eq!(actions.len(), 0);
+        }
+
+        #[test]
+        fn no_interchange_with_blocked_piece_and_in_house_piece() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Jack];
+
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true }); 
+            game.board.tiles[4] = Some(Piece { owner: 1, left_start: false });
+            game.board.tiles[68] = Some(Piece { owner: 1, left_start: true });
+
+            let actions = collect_interchange_actions(&game);
+
+            assert_eq!(actions.len(), 0);
+        }
+
+        #[test]
+        fn mulitple_interchanges() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Jack];
+
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true }); 
+            game.board.tiles[4] = Some(Piece { owner: 0, left_start: true }); 
+            game.board.tiles[7] = Some(Piece { owner: 1, left_start: true }); 
+
+            let actions = collect_interchange_actions(&game);
+
+            assert_eq!(actions.len(), 2);
+        }
+
+        #[test]
+        fn no_interchange_without_own_piece() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Jack];
+
+            game.board.tiles[1] = Some(Piece { owner: 1, left_start: true });
+            game.board.tiles[3] = Some(Piece { owner: 2, left_start: true });
+
+            let actions = collect_interchange_actions(&game);
+            assert_eq!(actions.len(), 0);
+        }
+
+        #[test]
+        fn interchange_without_own_piece_full_house() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+            game.trading_phase = false;
+
+            game.players[0].cards = vec![Card::Jack];
+            game.players[0].pieces_in_house = 4;
+
+            game.board.tiles[1] = Some(Piece { owner: 1, left_start: true });
+            game.board.tiles[3] = Some(Piece { owner: 2, left_start: true });
+
+            let actions = collect_interchange_actions(&game);
+            assert_eq!(actions.len(), 1);
         }
     }
 }

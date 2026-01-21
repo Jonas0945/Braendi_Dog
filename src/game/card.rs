@@ -59,4 +59,8 @@ impl Card {
     pub fn allows_backward_move(&self) -> bool {
         matches!(self, Card::Four | Card::Joker)
     }
+
+    pub fn is_interchange_card(&self) -> bool {
+        matches!(self, Card::Jack | Card::Joker)
+    }
 }
