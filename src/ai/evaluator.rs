@@ -1,7 +1,5 @@
-use std::u8::MAX;
-
-use crate::game::{Game};
-use crate::game::card::Card;
+use crate::game::game::GameVariant;
+use crate::game::Game;
 
 pub type Score = i32;
 
@@ -26,6 +24,101 @@ fn piece_has_any_move(game: &Game, from: usize, owner: usize) -> bool {
 
     false
 }
+
+fn is_threat(game: &Game, opponent_position: usize, opponent_index: usize, target_position:usize, target_index: usize) -> bool {
+    let board = &game.board;
+
+    if target_position >= board.ring_size {
+        return false;
+    }
+
+    let Some(target_piece) = board.tiles[target_position].as_ref() else {
+        return false;
+    };
+
+    if !target_piece.left_start {
+        return false;
+    }
+
+    if opponent_position >= board.ring_size {
+        return false;
+    }
+
+    // Check forward moves
+    if let Some(forward_distance) = board.distance_between(opponent_position, target_position, opponent_index) {
+        if forward_distance <= 13 {
+            if let Some(forward_path) = board.passed_tiles(opponent_position, target_position, opponent_index, false) {
+                if board.is_path_free(&forward_path) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // Check backward move
+    if let Some(backward_distance) = board.distance_between(target_position, opponent_position, target_index) {
+        if backward_distance == 4 {
+            if let Some(backward_path) = board.passed_tiles(opponent_position, target_position, opponent_index, true) {
+                if board.is_path_free(&backward_path) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/*fn is_protected(game: &Game, player_position: usize, player_index: usize) -> bool {
+    let board = &game.board;
+
+    if player_position >= board.ring_size {
+        return true;
+    }
+
+    let Some(player_piece) = board.tiles[player_position].as_ref() else {
+        return false;
+    };
+
+    if !player_piece.left_start {
+        return true;
+    }
+
+    for (opponent_position, opponent_tile) in board.tiles.iter().enumerate() {
+        let Some(opponent_piece) = opponent_tile else { continue };
+
+        let opponent_index = opponent_piece.owner;
+
+        if opponent_index == player_index || game.teammate_indices(player_index).contains(&opponent_index) {
+            continue;
+        }
+
+
+        // Check all forward moves
+        if let Some(forward_distance) = board.distance_between(opponent_position, player_position, opponent_index) {
+            if forward_distance <= 13 {
+                if let Some(forward_path) = board.passed_tiles(opponent_position, player_position, opponent_index, false) {
+                    if board.is_path_free(&forward_path) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        // Check all backward moves
+        if let Some(backward_distance) = board.distance_between(player_position, opponent_position, player_index) {
+            if backward_distance == 4 {
+                if let Some(backward_path) = board.passed_tiles(opponent_position, player_position, opponent_index, true) {
+                    if board.is_path_free(&backward_path) {
+                        return false;
+                    }
+                }
+            }
+        }      
+    }
+
+    true
+}*/
 
 pub struct EvalPerspective {
     pub player_index: usize,
@@ -184,13 +277,13 @@ impl EvalFeature {
                 let mut score = 0;
 
                 for (player_position, player_tile) in board.tiles.iter().enumerate() {
-                    let Some(player_piece) = player_tile else { continue };
+                    let Some(piece) = player_tile else { continue };
 
-                    if player_piece.owner != p.player_index {
+                    if piece.owner != p.player_index {
                         continue;
                     }
 
-                    if player_position >= board.ring_size || !player_piece.left_start {
+                    if player_position >= board.ring_size || !piece.left_start {
                         continue;
                     }
 
@@ -206,19 +299,7 @@ impl EvalFeature {
                                 continue;
                             }
 
-                            let forward_distance = board
-                                .distance_between(opponent_position, player_position, opponent_index)
-                                .unwrap_or(MAX);
-
-                            if forward_distance <= 13 {
-                                score -= 40;
-                            }
-
-                            let backward_distance = board
-                                .distance_between(player_position, opponent_position, p.player_index)
-                                .unwrap_or(MAX);
-
-                            if backward_distance == 4 {
+                            if is_threat(game, opponent_position, opponent_index, player_position, p.player_index) {
                                 score -= 40;
                             }
                         }
@@ -227,7 +308,66 @@ impl EvalFeature {
 
                 score
             },
-            _ => todo!()
+
+            EvalFeature::Teamplay => {
+                let game = context.game;
+                let p = &context.perspective;
+                let board = &game.board;
+
+                let mut score = 0;
+
+                match game.game_variant {
+                    GameVariant::FreeForAll(_) => return score,
+                    _ => {}
+                }
+
+                for &partner_index in &p.partner_indices {
+                    for (partner_position, partner_tile) in board.tiles.iter().enumerate() {
+                        let Some(partner_piece) = partner_tile else { continue };
+
+                        if partner_piece.owner != partner_index {
+                            continue;
+                        }
+
+                        if !partner_piece.left_start {
+                            continue;
+                        }
+
+                        if partner_position >= board.ring_size {
+                            score += 30;
+                            continue;
+                        }
+
+                        let mut threat_count = 0;
+
+                        for &opponent_index in &p.opponent_indices {
+                            for (opponent_position, opponent_tile) in board.tiles.iter().enumerate() {
+                                let Some(opponent_piece) = opponent_tile else { continue };
+
+                                if opponent_piece.owner != opponent_index {
+                                continue;
+                                }
+
+                                if opponent_position >= board.ring_size {
+                                    continue;
+                                }
+
+                                if is_threat(game, opponent_position, opponent_index, partner_position, partner_index) {
+                                    threat_count += 1;
+                                }
+                            }
+                        }
+
+                        if threat_count >= 1 {
+                            score -= threat_count * 40;
+                        } else {
+                            score += 10;
+                        }
+                    }
+                }
+
+                score
+            },
         }
     }
 }
@@ -263,6 +403,7 @@ mod tests {
     use super::*;
     use crate::game::game::GameVariant;
     use crate::game::Piece;
+    use crate::game::card::Card;
 
     mod eval_house_tests {
         use super::*;
@@ -569,8 +710,8 @@ mod tests {
             let mut game = Game::new(GameVariant::TwoVsTwo);
 
             game.board.tiles[12] = Some(Piece { owner: 0, left_start: true });
-            game.board.tiles[4] = Some(Piece { owner: 1, left_start: true }); // 12 Felder vorwärts
-            game.board.tiles[0] = Some(Piece { owner: 3, left_start: true });  // 4 Felder rückwärts
+            game.board.tiles[4] = Some(Piece { owner: 1, left_start: true });
+            game.board.tiles[0] = Some(Piece { owner: 3, left_start: true });
 
             let context = EvalContext {
                 game: &game,
@@ -607,6 +748,211 @@ mod tests {
             let feature = EvalFeature::Risk;
             let score = feature.evaluate(&context);
             assert_eq!(score, 0);
+        }
+    }
+
+    mod eval_teamplay_tests {
+        use super::*;
+
+        #[test]
+        fn teamplay_free_for_all_returns_zero() {
+            let mut game = Game::new(GameVariant::FreeForAll(4));
+
+            game.board.tiles[4] = Some(Piece { owner: 0, left_start: false });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::Teamplay;
+            let score = feature.evaluate(&context);
+
+            assert_eq!(score, 0);
+        }
+
+        #[test]
+        fn teamplay_partner_piece_in_house_scores_bonus() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.board.tiles[64] = Some(Piece {
+                owner: 2,
+                left_start: true,
+            });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::Teamplay;
+            let score = feature.evaluate(&context);
+
+            assert_eq!(score, 30);
+        }
+
+        #[test]
+        fn teamplay_safe_partner_piece_on_ring_scores_small_bonus() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.board.tiles[10] = Some(Piece {
+                owner: 2,
+                left_start: true,
+            });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::Teamplay;
+            let score = feature.evaluate(&context);
+
+            assert_eq!(score, 10);
+        }
+
+        #[test]
+        fn teamplay_partner_piece_with_single_threat_is_penalized() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.board.tiles[10] = Some(Piece {
+                owner: 2,
+                left_start: true,
+            });
+
+            game.board.tiles[8] = Some(Piece {
+                owner: 1,
+                left_start: true,
+            });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::Teamplay;
+            let score = feature.evaluate(&context);
+
+            assert_eq!(score, -40);
+        }
+
+        #[test]
+        fn teamplay_partner_piece_with_multiple_threats() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.board.tiles[10] = Some(Piece {
+                owner: 2,
+                left_start: true,
+            });
+
+            game.board.tiles[8] = Some(Piece {
+                owner: 1,
+                left_start: true,
+            });
+
+            game.board.tiles[6] = Some(Piece {
+                owner: 3,
+                left_start: true,
+            });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::Teamplay;
+            let score = feature.evaluate(&context);
+
+            assert_eq!(score, -80);
+        }
+
+        #[test]
+        fn teamplay_multiple_partner_pieces_are_aggregated() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.board.tiles[10] = Some(Piece {
+                owner: 2,
+                left_start: true,
+            });
+
+            game.board.tiles[68] = Some(Piece {
+                owner: 2,
+                left_start: true,
+            });
+
+            game.board.tiles[8] = Some(Piece {
+                owner: 1,
+                left_start: true,
+            });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::Teamplay;
+            let score = feature.evaluate(&context);
+
+            assert_eq!(score, -10);
+        }
+
+
+        #[test]
+        fn teamplay_piece_block() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.board.tiles[10] = Some(Piece {
+                owner: 2,
+                left_start: true,
+            });
+
+            game.board.tiles[8] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
+
+            game.board.tiles[6] = Some(Piece {
+                owner: 1,
+                left_start: true,
+            });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::Teamplay;
+            let score = feature.evaluate(&context);
+
+            assert_eq!(score, 10);
         }
     }
 }
