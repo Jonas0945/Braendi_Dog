@@ -1,3 +1,5 @@
+use std::u8::MAX;
+
 use crate::game::{Game};
 use crate::game::card::Card;
 
@@ -24,7 +26,6 @@ fn piece_has_any_move(game: &Game, from: usize, owner: usize) -> bool {
 
     false
 }
-
 
 pub struct EvalPerspective {
     pub player_index: usize,
@@ -170,6 +171,58 @@ impl EvalFeature {
                 // Only one piece on board
                 if movable_own == 1 && relevant_own >= 2  {
                     score -= 20;
+                }
+
+                score
+            },
+
+            EvalFeature::Risk => {
+                let game = context.game;
+                let p = &context.perspective;
+                let board = &game.board;
+
+                let mut score = 0;
+
+                for (player_position, player_tile) in board.tiles.iter().enumerate() {
+                    let Some(player_piece) = player_tile else { continue };
+
+                    if player_piece.owner != p.player_index {
+                        continue;
+                    }
+
+                    if player_position >= board.ring_size || !player_piece.left_start {
+                        continue;
+                    }
+
+                    for &opponent_index in &p.opponent_indices {
+                        for (opponent_position, opponent_tile) in game.board.tiles.iter().enumerate() {
+                            let Some(opponent_piece) = opponent_tile else { continue };
+
+                            if opponent_piece.owner != opponent_index {
+                                continue;
+                            }
+
+                            if opponent_position >= board.ring_size {
+                                continue;
+                            }
+
+                            let forward_distance = board
+                                .distance_between(opponent_position, player_position, opponent_index)
+                                .unwrap_or(MAX);
+
+                            if forward_distance <= 13 {
+                                score -= 40;
+                            }
+
+                            let backward_distance = board
+                                .distance_between(player_position, opponent_position, p.player_index)
+                                .unwrap_or(MAX);
+
+                            if backward_distance == 4 {
+                                score -= 40;
+                            }
+                        }
+                    }
                 }
 
                 score
@@ -440,6 +493,120 @@ mod tests {
 
             // Both pieces blocked
             assert_eq!(score, -2 * 15);
+        }
+    }
+
+    mod eval_risk_tests {
+        use super::*;
+
+        #[test]
+        fn risk_no_threats() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true });
+            game.board.tiles[32] = Some(Piece { owner: 1, left_start: true });
+            game.board.tiles[48] = Some(Piece { owner: 2, left_start: true });
+            game.board.tiles[16] = Some(Piece { owner: 3, left_start: true });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::Risk;
+            let score = feature.evaluate(&context);
+            assert_eq!(score, 0);
+        }
+
+        #[test]
+        fn risk_forward_threat() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.board.tiles[0] = Some(Piece { owner: 1, left_start: true });
+            game.board.tiles[10] = Some(Piece { owner: 0, left_start: true });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::Risk;
+            let score = feature.evaluate(&context);
+            assert_eq!(score, -40);
+        }
+
+        #[test]
+        fn risk_backward_threat() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.board.tiles[20] = Some(Piece { owner: 0, left_start: true });
+            game.board.tiles[24] = Some(Piece { owner: 1, left_start: true });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::Risk;
+            let score = feature.evaluate(&context);
+            assert_eq!(score, -40);
+        }
+
+        #[test]
+        fn risk_multiple_threats() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.board.tiles[12] = Some(Piece { owner: 0, left_start: true });
+            game.board.tiles[4] = Some(Piece { owner: 1, left_start: true }); // 12 Felder vorwärts
+            game.board.tiles[0] = Some(Piece { owner: 3, left_start: true });  // 4 Felder rückwärts
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::Risk;
+            let score = feature.evaluate(&context);
+            assert_eq!(score, -80);
+        }
+
+        #[test]
+        fn risk_piece_in_house_and_blocked_safe() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.board.tiles[64] = Some(Piece { owner: 0, left_start: true });
+            game.board.tiles[4] = Some(Piece { owner: 0, left_start: false });
+
+            game.board.tiles[63] = Some(Piece { owner: 1, left_start: true });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::Risk;
+            let score = feature.evaluate(&context);
+            assert_eq!(score, 0);
         }
     }
 }
