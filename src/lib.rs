@@ -7,7 +7,10 @@ pub use game::game::{Game, DogGame};
 pub use game::color::Color;
 pub use game::piece::Piece;
 pub use game::action::{Action, ActionKind};
+use serde::{Deserialize, Serialize};
 pub use ui::render;
+
+use crate::game::GameVariant;
 
 //Aktionen, die SPieler versuchen können
 pub enum ClientNachricht {
@@ -20,4 +23,11 @@ pub enum ServerNachrich{
     gamestate,
     error,
     spieler_beigetreten
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum BeginGameMesage {
+    ErstelleSpiel {variant: GameVariant, player_name: String},
+
+    SpielBeitreten {player_name: String},
 }
