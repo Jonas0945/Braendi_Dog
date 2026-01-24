@@ -1,7 +1,10 @@
 use crate::game::game::GameVariant;
 use crate::game::Game;
+use crate::game::board_view::collect_board_pieces;
 
 pub type Score = i32;
+
+
 
 fn piece_has_any_move(game: &Game, from: usize, owner: usize) -> bool {
     for card in &game.players[owner].cards {
@@ -140,9 +143,31 @@ enum EvalFeature {
 }
 
 impl EvalFeature {
-    
-    
     fn evaluate(&self, context: &EvalContext) -> Score {
+        let game = context.game;
+        let p = &context.perspective;
+        let board = &game.board;
+        let ring_size = board.ring_size;
+
+        let mut score = 0;
+
+        let board_pieces = collect_board_pieces(game);
+
+        let own_board_pieces: Vec<_> = board_pieces
+            .iter()
+            .filter(|bp| bp.owner == p.player_index)
+            .collect();
+
+        let partner_board_pieces: Vec<_> = board_pieces
+            .iter()
+            .filter(|bp| p.partner_indices.contains(&bp.owner))
+            .collect();
+
+        let opponent_board_pieces: Vec<_> = board_pieces
+            .iter()
+            .filter(|bp| p.opponent_indices.contains(&bp.owner))
+            .collect();
+        
         match self {
             EvalFeature::House => {
                 /*
@@ -150,14 +175,8 @@ impl EvalFeature {
                 Partner piece in house: +400
                 Opponent piece in house: -800
                 */
-                
-                let game = context.game;
-                let p = &context.perspective;
 
-                let mut score: Score = 0;
-
-                let own_house = 
-                    game.players[p.player_index].pieces_in_house as Score;
+                let own_house = game.players[p.player_index].pieces_in_house as Score;
                 
                 score += own_house * 1000;
 
@@ -181,31 +200,21 @@ impl EvalFeature {
                 Opponent piece: -4 per tile
                  */
 
-                let game = context.game;
-                let p = &context.perspective;
-                let board = &game.board;
-
-                let ring_size = board.ring_size as i32;           
-                let mut score: Score = 0;
-
-                for (from_index, tile) in board.tiles.iter().enumerate() {
-                    let Some(piece) = tile else { continue };
+                for piece in &board_pieces {
+                    if piece.position >= ring_size {
+                        continue
+                    };
 
                     let owner = piece.owner;
-
-                    if from_index >= board.ring_size {
-                        continue;
-                    }
-
                     let house_entry = board.start_field(owner);
 
                     let Some(distance) = 
-                        board.distance_between(from_index, house_entry, owner)
+                        board.distance_between(piece.position, house_entry, owner)
                     else {
                         continue;
                     };
 
-                    let progress = ring_size - distance as i32;
+                    let progress = ring_size as i32 - distance as i32;
 
                     if owner == p.player_index {
                         score += progress * 5;
@@ -225,44 +234,29 @@ impl EvalFeature {
                 Piece blocked: -15
                 Only one piece on board: -20
                  */
-                let game = context.game;
-                let p = &context.perspective;
-                let board = &game.board;
 
-                let mut relevant_own = 4;
-                let mut movable_own = 0;
-                let mut blocked_own = 0;
+                let mut relevant_pieces = 4;
+                let mut movable_pieces = 0;
+                let mut blocked_pieces = 0;
 
-                for (index, tile) in board.tiles.iter().enumerate() {
-                    let Some(piece) = tile else { continue };
-
-                    let owner = piece.owner;
-
-                    if owner != p.player_index {
+                for own in &own_board_pieces {
+                    if own.position >= ring_size {
+                        relevant_pieces -= 1;
                         continue;
                     }
 
-                    if index >= game.board.ring_size {
-                        continue;
-                    }
-
-                    // Piece is already in house
-                    relevant_own -= 1;
-
-                    if piece_has_any_move(game, index, owner) {
-                        movable_own += 1;
+                    if piece_has_any_move(game, own.position, own.owner) {
+                        movable_pieces += 1;
                     } else {
-                        blocked_own += 1;
+                        blocked_pieces += 1;
                     }
                 }
 
-                let mut score = 0;
-
-                score += movable_own * 10;
-                score -= blocked_own * 15;
+                score += movable_pieces * 10;
+                score -= blocked_pieces * 15;
 
                 // Only one piece on board
-                if movable_own == 1 && relevant_own >= 2  {
+                if movable_pieces == 1 && relevant_pieces >= 2  {
                     score -= 20;
                 }
 
@@ -270,38 +264,22 @@ impl EvalFeature {
             },
 
             EvalFeature::Risk => {
-                let game = context.game;
-                let p = &context.perspective;
-                let board = &game.board;
+                /*
+                Piece can be taken by other piece: -40 per threat
+                */
 
-                let mut score = 0;
-
-                for (player_position, player_tile) in board.tiles.iter().enumerate() {
-                    let Some(piece) = player_tile else { continue };
-
-                    if piece.owner != p.player_index {
+                for own in &own_board_pieces {
+                    if own.position >= ring_size || !own.left_start {
                         continue;
                     }
 
-                    if player_position >= board.ring_size || !piece.left_start {
-                        continue;
-                    }
+                    for opponent in &opponent_board_pieces {
+                        if opponent.position >= ring_size {
+                            continue;
+                        }
 
-                    for &opponent_index in &p.opponent_indices {
-                        for (opponent_position, opponent_tile) in game.board.tiles.iter().enumerate() {
-                            let Some(opponent_piece) = opponent_tile else { continue };
-
-                            if opponent_piece.owner != opponent_index {
-                                continue;
-                            }
-
-                            if opponent_position >= board.ring_size {
-                                continue;
-                            }
-
-                            if is_threat(game, opponent_position, opponent_index, player_position, p.player_index) {
-                                score -= 40;
-                            }
+                        if is_threat(game, opponent.position, opponent.owner, own.position, own.owner) {
+                            score -= 40;
                         }
                     }
                 }
@@ -310,59 +288,43 @@ impl EvalFeature {
             },
 
             EvalFeature::Teamplay => {
-                let game = context.game;
-                let p = &context.perspective;
-                let board = &game.board;
-
-                let mut score = 0;
+                /*
+                Team piece is blocked: -
+                Team piece is in house: +30
+                Team piece can be taken: -40 per threat
+                */
 
                 match game.game_variant {
                     GameVariant::FreeForAll(_) => return score,
                     _ => {}
                 }
 
-                for &partner_index in &p.partner_indices {
-                    for (partner_position, partner_tile) in board.tiles.iter().enumerate() {
-                        let Some(partner_piece) = partner_tile else { continue };
+                for partner in &partner_board_pieces {
+                    if !partner.left_start {
+                        continue;
+                    }
 
-                        if partner_piece.owner != partner_index {
+                    if partner.position >= ring_size {
+                        score += 30;
+                        continue;
+                    }
+
+                    let mut threat_count = 0;
+
+                    for opponent in &opponent_board_pieces {
+                        if opponent.position >= ring_size {
                             continue;
                         }
 
-                        if !partner_piece.left_start {
-                            continue;
+                        if is_threat(game, opponent.position, opponent.owner, partner.position, partner.owner) {
+                            threat_count += 1;
                         }
+                    }
 
-                        if partner_position >= board.ring_size {
-                            score += 30;
-                            continue;
-                        }
-
-                        let mut threat_count = 0;
-
-                        for &opponent_index in &p.opponent_indices {
-                            for (opponent_position, opponent_tile) in board.tiles.iter().enumerate() {
-                                let Some(opponent_piece) = opponent_tile else { continue };
-
-                                if opponent_piece.owner != opponent_index {
-                                continue;
-                                }
-
-                                if opponent_position >= board.ring_size {
-                                    continue;
-                                }
-
-                                if is_threat(game, opponent_position, opponent_index, partner_position, partner_index) {
-                                    threat_count += 1;
-                                }
-                            }
-                        }
-
-                        if threat_count >= 1 {
-                            score -= threat_count * 40;
-                        } else {
-                            score += 10;
-                        }
+                    if threat_count >= 1 {
+                        score -= threat_count * 40;
+                    } else {
+                        score += 10;
                     }
                 }
 

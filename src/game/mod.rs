@@ -7,6 +7,7 @@ pub mod color;
 pub mod piece;
 pub mod player;
 pub mod history;
+pub mod board_view;
 
 pub use game::{Game, DogGame};
 pub use color::Color;
