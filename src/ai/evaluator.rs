@@ -135,9 +135,10 @@ pub struct EvalContext<'a> {
 }
 
 enum EvalFeature {
-    House,          // Evaluates current pieces_in_house
+    HouseProgress,  // Evaluates current pieces_in_house
+    HouseMobility,  // Evaluates if pieces can enter/move in house
     BoardProgress,  // Evaluates distance towards house_tiles
-    Mobility,       // Evaluates if piece is in range of being blocked
+    BoardMobility,  // Evaluates if piece is in range of being blocked
     Risk,           // Evaluates if piece is in range of being captured
     Teamplay,       // Evaluates if teamplay is more beneficial
 }
@@ -169,7 +170,7 @@ impl EvalFeature {
             .collect();
         
         match self {
-            EvalFeature::House => {
+            EvalFeature::HouseProgress => {
                 /*
                 Own piece in house: +1000
                 Partner piece in house: +400
@@ -190,6 +191,41 @@ impl EvalFeature {
                     score -= count * 800;
                 }
                 
+                score
+            },
+
+            EvalFeature::HouseMobility => {
+                /*
+                Every piece is at the correct position: +40
+                Open space between pieces (further up gets worse score): - 25 * depth of tile 
+                */
+
+                let house_tiles = game.board.house_by_player(p.player_index);
+                let pieces_in_house = game.players[p.player_index].pieces_in_house as usize;
+
+                if pieces_in_house == 0 {
+                    return score
+                };
+
+                let mut seen_pieces = 0;
+
+                for (depth, &tile_index) in house_tiles.iter().enumerate().rev() {
+                    if seen_pieces == pieces_in_house {
+                        continue;
+                    }
+
+                    if game.board.tiles[tile_index].is_some() {
+                        seen_pieces += 1;
+                    } else {
+                        score -= depth as Score * 25;
+                    }
+                }
+
+                // Pieces at the correct position
+                if score == 0 {
+                    score += 40;
+                } 
+
                 score
             },
 
@@ -228,7 +264,7 @@ impl EvalFeature {
                 score
             },
 
-            EvalFeature::Mobility => {
+            EvalFeature::BoardMobility => {
                 /*
                 Piece can move: +10
                 Piece blocked: -15
@@ -265,7 +301,7 @@ impl EvalFeature {
 
             EvalFeature::Risk => {
                 /*
-                Piece can be taken by other piece: -40 per threat
+                Piece can be taken by other piece (up to 13 forwards, exactly 4 backwards): -40 per threat
                 */
 
                 for own in &own_board_pieces {
@@ -289,8 +325,8 @@ impl EvalFeature {
 
             EvalFeature::Teamplay => {
                 /*
-                Team piece is blocked: -
                 Team piece is in house: +30
+                Team piece is safe on ring (just started or no threat): +10
                 Team piece can be taken: -40 per threat
                 */
 
@@ -301,6 +337,7 @@ impl EvalFeature {
 
                 for partner in &partner_board_pieces {
                     if !partner.left_start {
+                        score += 10;
                         continue;
                     }
 
@@ -342,9 +379,10 @@ impl Evaluator {
     pub fn new_default() -> Self {
         Self {
             features: vec![
-                EvalFeature::House,
+                EvalFeature::HouseProgress,
+                EvalFeature::HouseMobility,
                 EvalFeature::BoardProgress,
-                EvalFeature::Mobility,
+                EvalFeature::BoardMobility,
                 EvalFeature::Risk,
                 EvalFeature::Teamplay,
             ],
@@ -367,11 +405,11 @@ mod tests {
     use crate::game::Piece;
     use crate::game::card::Card;
 
-    mod eval_house_tests {
+    mod eval_house_progress_tests {
         use super::*;
 
         #[test]
-        fn house_feature_basic_scoring() {
+        fn house_progress_feature_basic_scoring() {
             let mut game = Game::new(GameVariant::TwoVsTwo);
             game.players[0].pieces_in_house = 2;
             game.players[1].pieces_in_house = 1;
@@ -387,13 +425,239 @@ mod tests {
                 },
             };
 
-            let feature = EvalFeature::House;
+            let feature = EvalFeature::HouseProgress;
             let score = feature.evaluate(&context);
 
             assert_eq!(score, 2 * 1000 + 1 * 400 - (1 + 3) * 800);
         }
     }
 
+    mod eval_house_mobility_tests {
+        use super::*;
+
+        #[test]
+        fn house_mobility_no_pieces_in_house() {
+            let game = Game::new(GameVariant::TwoVsTwo);
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::HouseMobility;
+            let score = feature.evaluate(&context);
+
+            assert_eq!(score, 0);
+        }
+
+        #[test]
+        fn house_mobility_all_filled() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            let house = game.board.house_by_player(0);
+            for &idx in &house {
+                game.board.tiles[idx] = Some(Piece {
+                    owner: 0,
+                    left_start: true,
+                });
+            }
+
+            game.players[0].pieces_in_house = house.len() as u8;
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::HouseMobility;
+            let score = feature.evaluate(&context);
+
+            assert_eq!(score, 40);
+        }
+
+        #[test]
+        fn house_mobility_single_gap() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.players[0].pieces_in_house = 1;
+            let house = game.board.house_by_player(0);
+
+            game.board.tiles[house[2]] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::HouseMobility;
+            let score = feature.evaluate(&context);
+
+            assert_eq!(score, -75);
+
+        }
+        
+        #[test]
+        fn house_mobility_double_gap() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.players[0].pieces_in_house = 2;
+            let house = game.board.house_by_player(0);
+
+            game.board.tiles[house[2]] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+
+            game.board.tiles[house[0]] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::HouseMobility;
+            let score = feature.evaluate(&context);
+
+            assert_eq!(score, -25 - 75);
+
+        }
+
+        #[test]
+        fn house_triple_piece_no_gap() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.players[0].pieces_in_house = 3;
+            let house = game.board.house_by_player(0);
+
+            game.board.tiles[house[3]] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+
+            game.board.tiles[house[2]] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+
+            game.board.tiles[house[1]] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::HouseMobility;
+            let score = feature.evaluate(&context);
+
+            assert_eq!(score, 40);
+
+        }
+
+        #[test]
+        fn house_triple_piece_single_best_gap() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.players[0].pieces_in_house = 3;
+            let house = game.board.house_by_player(0);
+
+            game.board.tiles[house[3]] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+
+            game.board.tiles[house[2]] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+
+            game.board.tiles[house[0]] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::HouseMobility;
+            let score = feature.evaluate(&context);
+
+            assert_eq!(score, -25);
+
+        }
+
+        #[test]
+        fn house_triple_piece_single_middle_gap() {
+            let mut game = Game::new(GameVariant::TwoVsTwo);
+
+            game.players[0].pieces_in_house = 3;
+            let house = game.board.house_by_player(0);
+
+            game.board.tiles[house[3]] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+
+            game.board.tiles[house[1]] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+
+            game.board.tiles[house[0]] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+
+            let context = EvalContext {
+                game: &game,
+                perspective: EvalPerspective {
+                    player_index: 0,
+                    partner_indices: vec![2],
+                    opponent_indices: vec![1, 3],
+                },
+            };
+
+            let feature = EvalFeature::HouseMobility;
+            let score = feature.evaluate(&context);
+
+            assert_eq!(score, -50);
+
+        }
+    }
     mod eval_board_progress_tests {
         use super::*;
 
@@ -432,11 +696,11 @@ mod tests {
         }
     }
 
-    mod eval_mobility_tests {
+    mod eval_board_mobility_tests {
         use super::*;
 
         #[test]
-        fn mobility_basic_scoring() {
+        fn board_mobility_basic_scoring() {
             let mut game = Game::new(GameVariant::TwoVsTwo);
 
             game.players[0].cards = vec![
@@ -474,7 +738,7 @@ mod tests {
                 },
             };
 
-            let feature = EvalFeature::Mobility;
+            let feature = EvalFeature::BoardMobility;
             let score = feature.evaluate(&context);
 
             // Two pieces can move, one blocked
@@ -482,7 +746,7 @@ mod tests {
         }
 
         #[test]
-        fn mobility_only_one_piece_penalty() {
+        fn board_mobility_only_one_piece_penalty() {
             let mut game = Game::new(GameVariant::TwoVsTwo);
 
             game.players[0].cards = vec![
@@ -505,7 +769,7 @@ mod tests {
                 },
             };
 
-            let feature = EvalFeature::Mobility;
+            let feature = EvalFeature::BoardMobility;
             let score = feature.evaluate(&context);
 
             // Only one piece on board penalty
@@ -513,7 +777,7 @@ mod tests {
         }
 
         #[test]
-        fn mobility_no_relevant_pieces() {
+        fn board_mobility_no_relevant_pieces() {
             let game = Game::new(GameVariant::TwoVsTwo);
 
             let context = EvalContext {
@@ -525,7 +789,7 @@ mod tests {
                 },
             };
 
-            let feature = EvalFeature::Mobility;
+            let feature = EvalFeature::BoardMobility;
             let score = feature.evaluate(&context);
 
             // No relevant pieces should yield zero score
@@ -547,7 +811,7 @@ mod tests {
                 },
             };
 
-            let feature = EvalFeature::Mobility;
+            let feature = EvalFeature::BoardMobility;
             let score = feature.evaluate(&context);
 
             // All pieces in house should yield zero score
@@ -555,7 +819,7 @@ mod tests {
         }
 
         #[test]
-        fn mobility_all_pieces_blocked() {
+        fn board_mobility_all_pieces_blocked() {
             let mut game = Game::new(GameVariant::TwoVsTwo);
 
             game.players[0].cards = vec![
@@ -591,7 +855,7 @@ mod tests {
                 },
             };
 
-            let feature = EvalFeature::Mobility;
+            let feature = EvalFeature::BoardMobility;
             let score = feature.evaluate(&context);
 
             // Both pieces blocked
