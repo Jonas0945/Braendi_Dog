@@ -1,3 +1,4 @@
+use iced::widget::{Button, Container, Row, Text};
 use iced::widget::{button, canvas, column, container, pick_list, row, text, text_input};
 use iced::{
     Application, Color as IcedColor, Command, Element, Length, Point, Renderer, Settings, Theme,
@@ -71,6 +72,9 @@ struct DogApp {
     selected_card: Option<Card>,
     pending_action: Option<PendingAction>,
     msg: String,
+
+    selected_opponent: Option<usize>,
+    selected_opponent_card: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -83,6 +87,10 @@ enum Message {
     BoardClicked(usize),
     GameActionBtn(GameAction),
     CancelPendingAction,
+
+    OpponentSelected(usize),
+    OpponentCardSelected(usize),
+    OpponentCardBack,
 }
 
 impl Application for DogApp {
@@ -101,6 +109,9 @@ impl Application for DogApp {
                 selected_card: None,
                 pending_action: None,
                 msg: String::from("Willkommen! Wähle einen Spielmodus."),
+
+                selected_opponent: None,
+                selected_opponent_card: None,
             },
             Command::none(),
         )
@@ -112,6 +123,26 @@ impl Application for DogApp {
 
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
+            Message::OpponentSelected(idx) => {
+                self.selected_opponent = Some(idx);
+                self.selected_opponent_card = None;
+                self.msg = format!(
+                    "Gegner {:?} gewählt. Wähle Karte zum Klauen.",
+                    self.game.as_ref().unwrap().players[idx].color
+                );
+            }
+
+            Message::OpponentCardSelected(card_idx) => {
+                self.selected_opponent_card = Some(card_idx);
+                self.msg = format!("Karte {} von Gegner gewählt.", card_idx + 1);
+            }
+
+            Message::OpponentCardBack => {
+                self.selected_opponent = None;
+                self.selected_opponent_card = None;
+                self.msg = "Wähle einen Gegner.".to_string();
+            }
+
             Message::VariantSelected(kind) => {
                 self.selected_variant = Some(kind);
                 if kind != GameVariantKind::FreeForAll {
@@ -269,7 +300,6 @@ impl DogApp {
         let game = self.game.as_ref().unwrap();
 
         let highlights = self.get_possible_moves();
-        let highlights = self.get_possible_moves();
         let board = canvas(BoardView {
             game,
             highlights: highlights.clone(),
@@ -290,7 +320,46 @@ impl DogApp {
         .spacing(10)
         .height(Length::Fill);
 
+        let grab_bar: Option<Element<'_, Message>> =
+            if matches!(self.selected_variant, Some(GameVariantKind::FreeForAll)) {
+                if self.selected_opponent.is_none() {
+                    let mut row_buttons: Row<'_, Message> = Row::new().spacing(5);
+                    for (idx, player) in self.game.as_ref().unwrap().players.iter().enumerate() {
+                        if idx == self.game.as_ref().unwrap().current_player_index {
+                            continue;
+                        }
+                        row_buttons = row_buttons.push(
+                            Button::new(Text::new(format!("{:?}", player.color)))
+                                .on_press(Message::OpponentSelected(idx)),
+                        );
+                    }
+                    Some(Container::new(row_buttons).padding(5).into())
+                } else {
+                    let opponent_idx = self.selected_opponent.unwrap();
+                    let opponent_cards = &self.game.as_ref().unwrap().players[opponent_idx].cards;
+                    let mut row_buttons: Row<'_, Message> = Row::new().spacing(5);
+
+                    for (idx, _c) in opponent_cards.iter().enumerate() {
+                        row_buttons = row_buttons.push(
+                            Button::new(Text::new(format!("{}", idx + 1)))
+                                .on_press(Message::OpponentCardSelected(idx)),
+                        );
+                    }
+
+                    row_buttons = row_buttons.push(
+                        Button::new(Text::new("Zurück"))
+                            .style(iced::theme::Button::Destructive)
+                            .on_press(Message::OpponentCardBack),
+                    );
+
+                    Some(Container::new(row_buttons).padding(5).into())
+                }
+            } else {
+                None
+            };
+
         column![
+            grab_bar.unwrap_or_else(|| container(text("")).padding(0).into()),
             main_area,
             container(hand).padding(0).height(Length::Fixed(140.0))
         ]
@@ -328,7 +397,7 @@ impl DogApp {
         ]
         .spacing(5);
 
-        let btns = column![
+        let mut btns = column![
             text("Aktionen:").size(16),
             button("Legen (Place)")
                 .on_press(Message::GameActionBtn(GameAction::Place))
@@ -345,11 +414,15 @@ impl DogApp {
             button("Handel (Trade)")
                 .on_press(Message::GameActionBtn(GameAction::Trade))
                 .width(Length::Fill),
-            button("Klauen (Grab)")
-                .on_press(Message::GameActionBtn(GameAction::Grab))
-                .width(Length::Fill),
-        ]
-        .spacing(10);
+        ];
+
+        if matches!(self.selected_variant, Some(GameVariantKind::FreeForAll)) {
+            btns = btns.push(
+                button("Klauen (Grab)")
+                    .on_press(Message::GameActionBtn(GameAction::Grab))
+                    .width(Length::Fill),
+            );
+        }
 
         let mut col = column![info, btns].spacing(30);
 
@@ -415,8 +488,27 @@ impl DogApp {
                 };
                 self.do_action(card, act);
             }
-            _ => {
-                self.msg = "TODO: Implementieren".into();
+            GameAction::Grab => {
+                if let (Some(target_player_idx), Some(target_card)) =
+                    (self.selected_opponent, self.selected_opponent_card)
+                {
+                    if let Some(game) = self.game.as_mut() {
+                        let target_color = game.player_mut_by_index(target_player_idx).color;
+
+                        let act = Action {
+                            player: current_color,
+                            card,
+                            action: ActionKind::Grab {
+                                target_player: target_color,
+                                target_card,
+                            },
+                        };
+
+                        self.do_action(card, act);
+                    }
+                } else {
+                    self.msg = "Wähle zuerst einen Gegner und eine Karte!".to_string();
+                }
             }
         }
     }
@@ -487,19 +579,16 @@ impl DogApp {
             match game.action(card, action) {
                 Ok(_) => {
                     self.msg = "Zug erfolgreich!".into();
-                    // Aufräumen
-                    self.selected_card = None;
-                    self.pending_action = None;
-                    // self.clicked_tile = None;
                 }
                 Err(e) => {
                     self.msg = format!("Fehler: {}", e);
-                    // Bei Move Fehler -> Reset state
-                    if let Some(PendingAction::Move { from: Some(_) }) = self.pending_action {
-                        self.pending_action = None;
-                    }
                 }
             }
+
+            self.selected_card = None;
+            self.pending_action = None;
+            self.selected_opponent = None;
+            self.selected_opponent_card = None;
         }
     }
 }
