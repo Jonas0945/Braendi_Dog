@@ -1,4 +1,6 @@
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+use serde::{Serialize, Deserialize};
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Card {
     Ace, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten,
     Jack, Queen, King, 

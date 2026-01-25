@@ -1,5 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use crate::game::card::Card;
 use super::action::*;
+#[derive(Debug, Serialize, Deserialize)]
 
 pub struct HistoryEntry {
     pub action: Action,

@@ -1,6 +1,7 @@
 use std::fmt::Display;
+use serde::{Serialize, Deserialize};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Color {
     Red,
     Green,

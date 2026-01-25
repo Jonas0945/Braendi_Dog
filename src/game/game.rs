@@ -21,7 +21,7 @@ pub enum GameVariant {
 }
 
 
-
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Game {
     pub game_variant: GameVariant,
     pub board: Board,

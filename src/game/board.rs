@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 /// Pro Spieler werden 16 Felder ausgehend vom Start bis zum nächsten Startfeld kalkuliert
 /// Die Ringgröße entscheidet über die Position der HOUSE_TILES, statt sie fest als Konstante zu schreiben.
 
@@ -7,6 +9,7 @@ use super::piece::Piece;
 pub type Point = usize; // 0–79
 pub const HOUSE_SIZE: usize = 4;
 pub const SEGMENT_LENGTH: usize = 16;
+#[derive(Debug, Serialize, Deserialize)]
 
 pub struct Board {
     pub tiles: Vec<Option<Piece>>,

@@ -1,17 +1,18 @@
 use std::{fmt::Display, str::FromStr};
+use serde::{Serialize, Deserialize};
 
 use super::card::Card;
 use super::board::Point;
 use super::color::Color;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Action {
     pub player: Color,
     pub card: Card,
     pub action: ActionKind,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum ActionKind {
     Place { target_player: usize },
     Move { from: Point, to: Point },

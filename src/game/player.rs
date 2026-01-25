@@ -1,7 +1,8 @@
 use super::color::Color;
 use super::card::Card;
+use serde::{Serialize, Deserialize};
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Player {
     pub color: Color,
     pub pieces_to_place: u8,

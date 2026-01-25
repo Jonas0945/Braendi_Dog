@@ -13,19 +13,21 @@ pub use ui::render;
 use crate::game::GameVariant;
 
 //Aktionen, die SPieler versuchen können
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum ClientNachricht {
     beitritt,
     make_play,
     quit
 }
 //informiert Client um Gui zu aktualisieren
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum ServerNachrich{
     gamestate,
     error,
     spieler_beigetreten
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum BeginGameMesage {
     ErstelleSpiel {variant: GameVariant, player_name: String},
 
