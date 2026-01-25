@@ -1,6 +1,7 @@
 // src/lib.rs
 pub mod game;
 pub mod ui;
+pub mod ai;
 
 pub use game::game::{Game, DogGame};
 pub use game::color::Color;
