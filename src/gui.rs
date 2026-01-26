@@ -49,12 +49,16 @@ enum GameAction {
     Trade,
     Grab,
     Interchange,
+    TradeGrab,
 }
 
 #[derive(Debug, Clone)]
 enum PendingAction {
     Move { from: Option<usize> },
     Interchange { from: Option<usize> },
+
+    Grab,
+    TradeGrab,
 }
 
 enum Screen {
@@ -134,7 +138,18 @@ impl Application for DogApp {
 
             Message::OpponentCardSelected(card_idx) => {
                 self.selected_opponent_card = Some(card_idx);
-                self.msg = format!("Karte {} von Gegner gewählt.", card_idx + 1);
+
+                match self.pending_action {
+                    Some(PendingAction::Grab) => {
+                        self.execute_grab(false);
+                    }
+                    Some(PendingAction::TradeGrab) => {
+                        self.execute_grab(true);
+                    }
+                    _ => {
+                        self.msg = format!("Karte {} von Gegner gewählt.", card_idx + 1);
+                    }
+                }
             }
 
             Message::OpponentCardBack => {
@@ -196,6 +211,42 @@ impl Application for DogApp {
 }
 
 impl DogApp {
+    fn execute_grab(&mut self, trade: bool) {
+        let Some(card) = self.selected_card else {
+            self.msg = "Keine Karte gewählt!".into();
+            return;
+        };
+
+        let (Some(target_player_idx), Some(target_card)) =
+            (self.selected_opponent, self.selected_opponent_card)
+        else {
+            return;
+        };
+
+        let game = self.game.as_mut().unwrap();
+        let current_color = game.current_player().color;
+        let target_color = game.players[target_player_idx].color;
+
+        let action = if trade {
+            Action {
+                player: current_color,
+                card: None,
+                action: ActionKind::TradeGrab { target_card },
+            }
+        } else {
+            Action {
+                player: current_color,
+                card: Some(card),
+                action: ActionKind::Grab {
+                    target_player: target_color,
+                    target_card,
+                },
+            }
+        };
+
+        self.do_action(card, action);
+    }
+
     fn get_possible_moves(&self) -> Vec<usize> {
         let (
             Some(game),
@@ -208,10 +259,11 @@ impl DogApp {
             return vec![];
         };
 
-        let mut distances: Vec<i8> = match card.possible_distances() {
-            Some(d) => d.into_iter().map(|x| x as i8).collect(),
-            None => return vec![],
-        };
+        let mut distances: Vec<i8> = card
+            .possible_distances()
+            .into_iter()
+            .map(|x| x as i8)
+            .collect();
 
         if matches!(card, Card::Joker | Card::Four) {
             distances.push(-4);
@@ -320,43 +372,65 @@ impl DogApp {
         .spacing(10)
         .height(Length::Fill);
 
-        let grab_bar: Option<Element<'_, Message>> =
-            if matches!(self.selected_variant, Some(GameVariantKind::FreeForAll)) {
-                if self.selected_opponent.is_none() {
-                    let mut row_buttons: Row<'_, Message> = Row::new().spacing(5);
-                    for (idx, player) in self.game.as_ref().unwrap().players.iter().enumerate() {
-                        if idx == self.game.as_ref().unwrap().current_player_index {
-                            continue;
+        let grab_bar: Option<Element<'_, Message>> = if let Some(pending) = &self.pending_action {
+            match pending {
+                PendingAction::Grab => {
+                    if self.selected_opponent.is_none() {
+                        let mut row_buttons: Row<'_, Message> = Row::new().spacing(5);
+                        for (idx, player) in self.game.as_ref().unwrap().players.iter().enumerate()
+                        {
+                            if idx == self.game.as_ref().unwrap().current_player_index {
+                                continue;
+                            }
+                            row_buttons = row_buttons.push(
+                                Button::new(Text::new(format!("{:?}", player.color)))
+                                    .on_press(Message::OpponentSelected(idx)),
+                            );
                         }
+                        Some(Container::new(row_buttons).padding(5).into())
+                    } else {
+                        let opponent_idx = self.selected_opponent.unwrap();
+                        let opponent_cards =
+                            &self.game.as_ref().unwrap().players[opponent_idx].cards;
+
+                        let mut row_buttons: Row<'_, Message> = Row::new().spacing(5);
+                        for (idx, _) in opponent_cards.iter().enumerate() {
+                            row_buttons = row_buttons.push(
+                                Button::new(Text::new(format!("{}", idx + 1)))
+                                    .on_press(Message::OpponentCardSelected(idx)),
+                            );
+                        }
+
                         row_buttons = row_buttons.push(
-                            Button::new(Text::new(format!("{:?}", player.color)))
-                                .on_press(Message::OpponentSelected(idx)),
+                            Button::new(Text::new("Zurück"))
+                                .style(iced::theme::Button::Destructive)
+                                .on_press(Message::OpponentCardBack),
                         );
+
+                        Some(Container::new(row_buttons).padding(5).into())
                     }
-                    Some(Container::new(row_buttons).padding(5).into())
-                } else {
+                }
+
+                PendingAction::TradeGrab => {
                     let opponent_idx = self.selected_opponent.unwrap();
                     let opponent_cards = &self.game.as_ref().unwrap().players[opponent_idx].cards;
-                    let mut row_buttons: Row<'_, Message> = Row::new().spacing(5);
 
-                    for (idx, _c) in opponent_cards.iter().enumerate() {
+                    let mut row_buttons: Row<'_, Message> = Row::new().spacing(5);
+                    for (idx, _) in opponent_cards.iter().enumerate() {
                         row_buttons = row_buttons.push(
                             Button::new(Text::new(format!("{}", idx + 1)))
                                 .on_press(Message::OpponentCardSelected(idx)),
                         );
                     }
 
-                    row_buttons = row_buttons.push(
-                        Button::new(Text::new("Zurück"))
-                            .style(iced::theme::Button::Destructive)
-                            .on_press(Message::OpponentCardBack),
-                    );
-
                     Some(Container::new(row_buttons).padding(5).into())
                 }
-            } else {
-                None
-            };
+
+                _ => None,
+            }
+        } else {
+            None
+        };
 
         column![
             grab_bar.unwrap_or_else(|| container(text("")).padding(0).into()),
@@ -384,6 +458,38 @@ impl DogApp {
             })
             .into()
     }
+    fn debug_view(&self) -> Element<'_, Message> {
+        let game_debug = if let Some(game) = &self.game {
+            column![
+                text("GAME").size(14),
+                text(format!("round: {}", game.round)),
+                text(format!("trading_phase: {}", game.trading_phase)),
+                text(format!(
+                    "current_player_index: {}",
+                    game.current_player_index
+                )),
+            ]
+            .spacing(4)
+        } else {
+            column![text("GAME: none")].spacing(4)
+        };
+
+        column![
+            text("DEBUG").size(16),
+            // App state
+            text(format!("selected_card: {:?}", self.selected_card)),
+            text(format!("pending_action: {:?}", self.pending_action)),
+            text(format!("selected_opponent: {:?}", self.selected_opponent)),
+            text(format!(
+                "selected_opponent_card: {:?}",
+                self.selected_opponent_card
+            )),
+            text("----------------"),
+            game_debug,
+        ]
+        .spacing(4)
+        .into()
+    }
 
     fn make_sidebar(&self, game: &Game) -> Element<'_, Message> {
         let info = column![
@@ -397,44 +503,92 @@ impl DogApp {
         ]
         .spacing(5);
 
-        let mut btns = column![
-            text("Aktionen:").size(16),
-            button("Legen (Place)")
-                .on_press(Message::GameActionBtn(GameAction::Place))
-                .width(Length::Fill),
-            button("Ziehen (Move)")
-                .on_press(Message::GameActionBtn(GameAction::Move))
-                .width(Length::Fill),
-            button("Tauschen (Interchange)")
-                .on_press(Message::GameActionBtn(GameAction::Interchange))
-                .width(Length::Fill),
-            button("Abwerfen (Remove)")
-                .on_press(Message::GameActionBtn(GameAction::Remove))
-                .width(Length::Fill),
-            button("Handel (Trade)")
-                .on_press(Message::GameActionBtn(GameAction::Trade))
-                .width(Length::Fill),
-        ];
+        let player = game.current_player();
+        let hand = &player.cards;
+        let piece_on_board = (player.pieces_to_place + player.pieces_in_house) < 4;
+        let can_move =
+            piece_on_board && hand.iter().any(|c| !matches!(c, Card::Jack | Card::Seven));
+        let can_interchange =
+            piece_on_board && hand.iter().any(|c| matches!(c, Card::Jack | Card::Joker));
+        let has_place_card = hand
+            .iter()
+            .any(|c| matches!(c, Card::Ace | Card::King | Card::Joker));
+        let has_grab_card = hand.iter().any(|c| matches!(c, Card::Two))
+            && matches!(self.selected_variant, Some(GameVariantKind::FreeForAll));
 
-        if matches!(self.selected_variant, Some(GameVariantKind::FreeForAll)) {
+        let mut btns = column![].spacing(5);
+
+        if !game.trading_phase {
+            if can_move {
+                btns = btns.push(
+                    button("Ziehen (Move)")
+                        .on_press(Message::GameActionBtn(GameAction::Move))
+                        .width(Length::Fill),
+                );
+            }
+
+            if has_place_card {
+                btns = btns.push(
+                    button("Legen (Place)")
+                        .on_press(Message::GameActionBtn(GameAction::Place))
+                        .width(Length::Fill),
+                );
+            }
+
+            if can_interchange {
+                btns = btns.push(
+                    button("Tauschen (Interchange)")
+                        .on_press(Message::GameActionBtn(GameAction::Interchange))
+                        .width(Length::Fill),
+                );
+            }
+
             btns = btns.push(
-                button("Klauen (Grab)")
-                    .on_press(Message::GameActionBtn(GameAction::Grab))
+                button("Abwerfen (Remove)")
+                    .on_press(Message::GameActionBtn(GameAction::Remove))
                     .width(Length::Fill),
             );
+
+            if has_grab_card {
+                btns = btns.push(
+                    button("Klauen (Grab)")
+                        .on_press(Message::GameActionBtn(GameAction::Grab))
+                        .width(Length::Fill),
+                );
+            }
+        } else {
+            if matches!(self.selected_variant, Some(GameVariantKind::FreeForAll)) {
+                btns = btns.push(
+                    button("Tausch-Klau (TradeGrab)")
+                        .on_press(Message::GameActionBtn(GameAction::TradeGrab))
+                        .width(Length::Fill),
+                );
+            } else {
+                btns = btns.push(
+                    button("Handel (Trade)")
+                        .on_press(Message::GameActionBtn(GameAction::Trade))
+                        .width(Length::Fill),
+                );
+            }
         }
 
-        let mut col = column![info, btns].spacing(30);
-
         if self.pending_action.is_some() {
-            col = col.push(
+            btns = btns.push(
                 button("Abbrechen")
                     .style(iced::theme::Button::Destructive)
                     .on_press(Message::CancelPendingAction),
             );
         }
 
-        col.into()
+        column![
+            info,
+            btns,
+            container(self.debug_view())
+                .padding(10)
+                .style(iced::theme::Container::Box),
+        ]
+        .spacing(30)
+        .into()
     }
 
     fn handle_btn_click(&mut self, action_type: GameAction) {
@@ -452,6 +606,30 @@ impl DogApp {
         };
 
         match action_type {
+            GameAction::Grab => {
+                self.pending_action = Some(PendingAction::Grab);
+                self.selected_opponent = None;
+                self.selected_opponent_card = None;
+                self.msg = "Wähle einen Gegner zum Klauen.".into();
+            }
+
+            GameAction::TradeGrab => {
+                let game = self.game.as_ref().unwrap();
+                let prev_idx = if game.current_player_index == 0 {
+                    game.players.len() - 1
+                } else {
+                    game.current_player_index - 1
+                };
+                self.pending_action = Some(PendingAction::TradeGrab);
+                self.selected_opponent = Some(prev_idx);
+                self.selected_opponent_card = None;
+
+                self.msg = format!(
+                    "Tausch-Klau: Wähle Karte von {:?}.",
+                    game.players[prev_idx].color
+                );
+            }
+
             GameAction::Move => {
                 self.pending_action = Some(PendingAction::Move { from: None });
                 self.msg = "Wähle Figur (Start).".into();
@@ -465,7 +643,7 @@ impl DogApp {
             GameAction::Place => {
                 let act = Action {
                     player: current_color,
-                    card,
+                    card: Some(card),
                     action: ActionKind::Place {
                         target_player: current_idx,
                     },
@@ -475,7 +653,7 @@ impl DogApp {
             GameAction::Remove => {
                 let act = Action {
                     player: current_color,
-                    card,
+                    card: Some(card),
                     action: ActionKind::Remove,
                 };
                 self.do_action(card, act);
@@ -483,32 +661,10 @@ impl DogApp {
             GameAction::Trade => {
                 let act = Action {
                     player: current_color,
-                    card,
+                    card: Some(card),
                     action: ActionKind::Trade,
                 };
                 self.do_action(card, act);
-            }
-            GameAction::Grab => {
-                if let (Some(target_player_idx), Some(target_card)) =
-                    (self.selected_opponent, self.selected_opponent_card)
-                {
-                    if let Some(game) = self.game.as_mut() {
-                        let target_color = game.player_mut_by_index(target_player_idx).color;
-
-                        let act = Action {
-                            player: current_color,
-                            card,
-                            action: ActionKind::Grab {
-                                target_player: target_color,
-                                target_card,
-                            },
-                        };
-
-                        self.do_action(card, act);
-                    }
-                } else {
-                    self.msg = "Wähle zuerst einen Gegner und eine Karte!".to_string();
-                }
             }
         }
     }
@@ -529,12 +685,15 @@ impl DogApp {
 
         if let Some(pending) = self.pending_action.clone() {
             match pending {
+                PendingAction::Grab | PendingAction::TradeGrab => {
+                    self.msg = "Wähle einen Gegner und eine Karte oben.".into();
+                }
                 PendingAction::Move { from } => {
                     if let Some(start_idx) = from {
                         // Zweiter Klick -> Ausführen
                         let act = Action {
                             player: current_color,
-                            card,
+                            card: Some(card),
                             action: ActionKind::Move {
                                 from: start_idx,
                                 to: tile_idx,
@@ -559,7 +718,7 @@ impl DogApp {
                     Some(first_idx) => {
                         let act = Action {
                             player: current_color,
-                            card,
+                            card: Some(card),
                             action: ActionKind::Interchange {
                                 a: first_idx,
                                 b: tile_idx,
@@ -574,15 +733,17 @@ impl DogApp {
         }
     }
 
-    fn do_action(&mut self, card: Card, action: Action) {
+    fn do_action(&mut self, card: Card, mut action: Action) {
+        if matches!(action.action, ActionKind::TradeGrab { .. }) {
+            action.card = None;
+        } else {
+            action.card = Some(card);
+        }
+
         if let Some(game) = self.game.as_mut() {
-            match game.action(card, action) {
-                Ok(_) => {
-                    self.msg = "Zug erfolgreich!".into();
-                }
-                Err(e) => {
-                    self.msg = format!("Fehler: {}", e);
-                }
+            match game.action(action.card, action) {
+                Ok(_) => self.msg = "Zug erfolgreich!".into(),
+                Err(e) => self.msg = format!("Fehler: {}", e),
             }
 
             self.selected_card = None;
