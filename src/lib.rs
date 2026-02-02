@@ -24,7 +24,8 @@ pub enum ClientNachricht {
 pub enum ServerNachrich{
     gamestate,
     error,
-    spieler_beigetreten
+    spieler_beigetreten,
+    makeplay
 }
 
 #[derive(Serialize, Deserialize, Debug)]
