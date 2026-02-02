@@ -1,11 +1,11 @@
+use braendi_dog::ai::generator;
+use braendi_dog::{Action, ActionKind, Card, Color as GameColor, DogGame, Game, GameVariant};
 use iced::widget::{Button, Container, Row, Text};
 use iced::widget::{button, canvas, column, container, pick_list, row, text, text_input};
 use iced::{
-    event, executor, mouse, window, Application, Color as IcedColor, Command, Element, Length,
-    Point, Renderer, Settings, Size, Subscription, Theme,
+    Application, Color as IcedColor, Command, Element, Length, Point, Renderer, Settings, Size,
+    Subscription, Theme, event, executor, mouse, window,
 };
-
-use braendi_dog::{Action, ActionKind, Card, Color as GameColor, DogGame, Game, GameVariant};
 
 pub fn launch() -> iced::Result {
     DogApp::run(Settings::default())
@@ -288,8 +288,9 @@ impl DogApp {
             distances.push(-4);
         }
 
-        let mut targets = Vec::new();
-        let board_len = game.board.tiles.len();
+        let legal_actions = generator::generate_all_legal_actions(game);
+
+        let mut result = Vec::new();
 
         for dist in distances {
             let backward = dist < 0;
@@ -299,26 +300,29 @@ impl DogApp {
                 continue;
             }
 
-            for to_idx in 0..board_len {
+            for action in &legal_actions {
+                let to = match action.action {
+                    ActionKind::Move { to, .. } | ActionKind::Split { to, .. } => to,
+                    _ => continue,
+                };
+
                 let ok = if backward {
                     game.board
-                        .distance_between(to_idx, *from_idx, game.current_player_index)
+                        .distance_between(to, *from_idx, game.current_player_index)
                         == Some(abs_dist)
                 } else {
                     game.board
-                        .distance_between(*from_idx, to_idx, game.current_player_index)
+                        .distance_between(*from_idx, to, game.current_player_index)
                         == Some(abs_dist)
                 };
 
                 if ok {
-                    targets.push(to_idx);
+                    result.push(to);
                 }
             }
         }
 
-        targets.sort_unstable();
-        targets.dedup();
-        targets
+        result
     }
 
     fn build_game_variant(&self) -> Option<GameVariant> {
@@ -386,12 +390,13 @@ impl DogApp {
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .style(iced::theme::Container::Transparent),
-            
             container(sidebar)
                 .width(Length::Fixed(250.0))
                 .padding(10)
                 .style(|_: &Theme| container::Appearance {
-                    background: Some(iced::Background::Color(IcedColor::from_rgba(0.0, 0.0, 0.0, 0.3))),
+                    background: Some(iced::Background::Color(IcedColor::from_rgba(
+                        0.0, 0.0, 0.0, 0.3
+                    ))),
                     text_color: Some(IcedColor::WHITE),
                     ..Default::default()
                 })
@@ -401,13 +406,11 @@ impl DogApp {
 
         let grab_bar = self.build_grab_bar();
 
-        container(
-            column![
-                grab_bar.unwrap_or_else(|| container(text("")).padding(0).into()),
-                main_area,
-                container(hand).padding(0).height(Length::Fixed(180.0)) 
-            ]
-        )
+        container(column![
+            grab_bar.unwrap_or_else(|| container(text("")).padding(0).into()),
+            main_area,
+            container(hand).padding(0).height(Length::Fixed(180.0))
+        ])
         .width(Length::Fill)
         .height(Length::Fill)
         .style(|_: &Theme| container::Appearance {
@@ -491,18 +494,21 @@ impl DogApp {
             .style(iced::theme::Container::Transparent)
             .into()
     }
-    
+
     fn debug_view(&self) -> Element<'_, Message> {
         let font_size = 12;
         let game_debug = if let Some(game) = &self.game {
             column![
                 text("GAME").size(font_size).style(IcedColor::WHITE),
-                text(format!("round: {}", game.round)).size(font_size).style(IcedColor::from_rgb(0.8,0.8,0.8)),
-                text(format!("trading_phase: {}", game.trading_phase)).size(font_size).style(IcedColor::from_rgb(0.8,0.8,0.8)),
-                text(format!(
-                    "current_player: {}",
-                    game.current_player_index
-                )).size(font_size).style(IcedColor::from_rgb(0.8,0.8,0.8)),
+                text(format!("round: {}", game.round))
+                    .size(font_size)
+                    .style(IcedColor::from_rgb(0.8, 0.8, 0.8)),
+                text(format!("trading_phase: {}", game.trading_phase))
+                    .size(font_size)
+                    .style(IcedColor::from_rgb(0.8, 0.8, 0.8)),
+                text(format!("current_player: {}", game.current_player_index))
+                    .size(font_size)
+                    .style(IcedColor::from_rgb(0.8, 0.8, 0.8)),
             ]
             .spacing(2)
         } else {
@@ -511,9 +517,15 @@ impl DogApp {
 
         column![
             text("DEBUG").size(14).style(IcedColor::WHITE),
-            text(format!("sel_card: {:?}", self.selected_card)).size(font_size).style(IcedColor::from_rgb(0.8,0.8,0.8)),
-            text(format!("pending: {:?}", self.pending_action)).size(font_size).style(IcedColor::from_rgb(0.8,0.8,0.8)),
-            text("----------------").size(font_size).style(IcedColor::from_rgb(0.5,0.5,0.5)),
+            text(format!("sel_card: {:?}", self.selected_card))
+                .size(font_size)
+                .style(IcedColor::from_rgb(0.8, 0.8, 0.8)),
+            text(format!("pending: {:?}", self.pending_action))
+                .size(font_size)
+                .style(IcedColor::from_rgb(0.8, 0.8, 0.8)),
+            text("----------------")
+                .size(font_size)
+                .style(IcedColor::from_rgb(0.5, 0.5, 0.5)),
             game_debug,
         ]
         .spacing(4)
@@ -522,34 +534,58 @@ impl DogApp {
 
     fn make_sidebar(&self, game: &Game) -> Element<'_, Message> {
         let font_std = 16;
+
         let info = column![
-            text(format!("Runde: {}", game.round)).size(18).style(IcedColor::WHITE),
+            text(format!("Runde: {}", game.round))
+                .size(18)
+                .style(IcedColor::WHITE),
             text(format!(
                 "Am Zug: {:?} (P{})",
                 game.current_player().color,
                 game.current_player_index
-            )).size(18).style(IcedColor::WHITE),
-            text(&self.msg).size(14).style(IcedColor::from_rgb(0.9, 0.9, 0.9)),
+            ))
+            .size(18)
+            .style(IcedColor::WHITE),
+            text(&self.msg)
+                .size(14)
+                .style(IcedColor::from_rgb(0.9, 0.9, 0.9)),
         ]
         .spacing(10);
 
-        let player = game.current_player();
-        let hand = &player.cards;
-        let piece_on_board = (player.pieces_to_place + player.pieces_in_house) < 4;
-        let can_move =
-            piece_on_board && hand.iter().any(|c| !matches!(c, Card::Jack | Card::Seven));
-        let can_interchange =
-            piece_on_board && hand.iter().any(|c| matches!(c, Card::Jack | Card::Joker));
-        let has_place_card = hand
+        let legal_actions = generator::generate_all_legal_actions(game);
+
+        let has_move = legal_actions
             .iter()
-            .any(|c| matches!(c, Card::Ace | Card::King | Card::Joker));
-        let has_grab_card = hand.iter().any(|c| matches!(c, Card::Two))
-            && matches!(self.selected_variant, Some(GameVariantKind::FreeForAll));
+            .any(|a| matches!(a.action, ActionKind::Move { .. }));
+
+        let has_place = legal_actions
+            .iter()
+            .any(|a| matches!(a.action, ActionKind::Place { .. }));
+
+        let has_interchange = legal_actions
+            .iter()
+            .any(|a| matches!(a.action, ActionKind::Interchange { .. }));
+
+        let has_remove = legal_actions
+            .iter()
+            .any(|a| matches!(a.action, ActionKind::Remove));
+
+        let has_grab = legal_actions
+            .iter()
+            .any(|a| matches!(a.action, ActionKind::Grab { .. }));
+
+        let has_trade = legal_actions
+            .iter()
+            .any(|a| matches!(a.action, ActionKind::Trade));
+
+        let has_trade_grab = legal_actions
+            .iter()
+            .any(|a| matches!(a.action, ActionKind::TradeGrab { .. }));
 
         let mut btns = column![].spacing(10);
 
         if !game.trading_phase {
-            if can_move {
+            if has_move {
                 btns = btns.push(
                     button(text("Ziehen (Move)").size(font_std))
                         .on_press(Message::GameActionBtn(GameAction::Move))
@@ -557,7 +593,7 @@ impl DogApp {
                 );
             }
 
-            if has_place_card {
+            if has_place {
                 btns = btns.push(
                     button(text("Legen (Place)").size(font_std))
                         .on_press(Message::GameActionBtn(GameAction::Place))
@@ -565,7 +601,7 @@ impl DogApp {
                 );
             }
 
-            if can_interchange {
+            if has_interchange {
                 btns = btns.push(
                     button(text("Tauschen (Interchange)").size(font_std))
                         .on_press(Message::GameActionBtn(GameAction::Interchange))
@@ -573,13 +609,15 @@ impl DogApp {
                 );
             }
 
-            btns = btns.push(
-                button(text("Abwerfen (Remove)").size(font_std))
-                    .on_press(Message::GameActionBtn(GameAction::Remove))
-                    .width(Length::Fill),
-            );
+            if has_remove {
+                btns = btns.push(
+                    button(text("Abwerfen (Remove)").size(font_std))
+                        .on_press(Message::GameActionBtn(GameAction::Remove))
+                        .width(Length::Fill),
+                );
+            }
 
-            if has_grab_card {
+            if has_grab {
                 btns = btns.push(
                     button(text("Klauen (Grab)").size(font_std))
                         .on_press(Message::GameActionBtn(GameAction::Grab))
@@ -587,13 +625,13 @@ impl DogApp {
                 );
             }
         } else {
-            if matches!(self.selected_variant, Some(GameVariantKind::FreeForAll)) {
+            if has_trade_grab {
                 btns = btns.push(
                     button(text("Tausch-Klau (TradeGrab)").size(font_std))
                         .on_press(Message::GameActionBtn(GameAction::TradeGrab))
                         .width(Length::Fill),
                 );
-            } else {
+            } else if has_trade {
                 btns = btns.push(
                     button(text("Handel (Trade)").size(font_std))
                         .on_press(Message::GameActionBtn(GameAction::Trade))
@@ -616,7 +654,9 @@ impl DogApp {
             container(self.debug_view())
                 .padding(10)
                 .style(|_: &Theme| container::Appearance {
-                    background: Some(iced::Background::Color(IcedColor::from_rgba(0.0, 0.0, 0.0, 0.3))),
+                    background: Some(iced::Background::Color(IcedColor::from_rgba(
+                        0.0, 0.0, 0.0, 0.3
+                    ))),
                     text_color: Some(IcedColor::from_rgb(0.7, 0.7, 0.7)),
                     border: iced::Border {
                         radius: 5.0.into(),
@@ -789,21 +829,25 @@ impl DogApp {
     }
 }
 
-
 struct BoardView<'a> {
     game: &'a Game,
     highlights: Vec<usize>,
 }
 
-
-fn get_tile_position(index: usize, total_players: usize, center: Point, scale: f32, rotation_angle: f32) -> Point {
+fn get_tile_position(
+    index: usize,
+    total_players: usize,
+    center: Point,
+    scale: f32,
+    rotation_angle: f32,
+) -> Point {
     let r_ring = 250.0 * scale;
     let ring_size = total_players * 16;
-    
+
     if index < ring_size {
         let angle = (index as f32 / ring_size as f32) * std::f32::consts::TAU;
         let final_angle = angle + rotation_angle;
-        
+
         Point::new(
             center.x + r_ring * final_angle.cos(),
             center.y + r_ring * final_angle.sin(),
@@ -818,7 +862,7 @@ fn get_tile_position(index: usize, total_players: usize, center: Point, scale: f
         let final_angle = angle + rotation_angle;
 
         let r_current = r_ring - (30.0 * scale) - (step as f32 * 35.0 * scale);
-        
+
         Point::new(
             center.x + r_current * final_angle.cos(),
             center.y + r_current * final_angle.sin(),
@@ -829,7 +873,7 @@ fn get_tile_position(index: usize, total_players: usize, center: Point, scale: f
 fn is_hit(cursor: Point, pos: Point, radius: f32) -> bool {
     let dx = cursor.x - pos.x;
     let dy = cursor.y - pos.y;
-    (dx*dx + dy*dy).sqrt() < radius
+    (dx * dx + dy * dy).sqrt() < radius
 }
 
 impl<'a> canvas::Program<Message> for BoardView<'a> {
@@ -842,8 +886,11 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
         bounds: iced::Rectangle,
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
-        
-        let cursor_position = if let Some(p) = cursor.position_in(bounds) { p } else { return (canvas::event::Status::Ignored, None); };
+        let cursor_position = if let Some(p) = cursor.position_in(bounds) {
+            p
+        } else {
+            return (canvas::event::Status::Ignored, None);
+        };
 
         if let canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) = event {
             let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
@@ -852,16 +899,20 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
             let ring_size = self.game.board.ring_size;
 
             let min_dim = bounds.width.min(bounds.height);
-            let scale = min_dim / 850.0; 
-            
+            let scale = min_dim / 850.0;
+
             let current_p_idx = self.game.current_player_index;
-            let current_p_angle = (current_p_idx as f32 * 16.0 / ring_size as f32) * std::f32::consts::TAU;
+            let current_p_angle =
+                (current_p_idx as f32 * 16.0 / ring_size as f32) * std::f32::consts::TAU;
             let rotation = std::f32::consts::FRAC_PI_2 - current_p_angle;
 
             for i in 0..total_tiles {
                 let pos = get_tile_position(i, total_players, center, scale, rotation);
-                if is_hit(cursor_position, pos, 12.0 * scale) { 
-                    return (canvas::event::Status::Captured, Some(Message::BoardClicked(i)));
+                if is_hit(cursor_position, pos, 12.0 * scale) {
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::BoardClicked(i)),
+                    );
                 }
             }
         }
@@ -883,49 +934,54 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
         let total_tiles = ring_size + total_players * 4;
 
         let min_dim = bounds.width.min(bounds.height);
-        let scale = min_dim / 850.0; 
+        let scale = min_dim / 850.0;
 
         let current_p_idx = self.game.current_player_index;
-        let current_p_angle = (current_p_idx as f32 * 16.0 / ring_size as f32) * std::f32::consts::TAU;
+        let current_p_angle =
+            (current_p_idx as f32 * 16.0 / ring_size as f32) * std::f32::consts::TAU;
         let rotation = std::f32::consts::FRAC_PI_2 - current_p_angle;
 
         let board_radius = 340.0 * scale;
         let line_width = 3.0 * scale;
-        
-        let shadow = canvas::Path::circle(Point::new(center.x + 10.0*scale, center.y + 10.0*scale), board_radius);
+
+        let shadow = canvas::Path::circle(
+            Point::new(center.x + 10.0 * scale, center.y + 10.0 * scale),
+            board_radius,
+        );
         frame.fill(&shadow, IcedColor::from_rgba(0.0, 0.0, 0.0, 0.5));
 
         let bg = canvas::Path::circle(center, board_radius);
         frame.fill(&bg, IcedColor::from_rgb(0.85, 0.70, 0.55)); // Holz
-        frame.stroke(&bg, canvas::Stroke::default().with_width(line_width).with_color(IcedColor::from_rgb(0.5, 0.3, 0.1)));
+        frame.stroke(
+            &bg,
+            canvas::Stroke::default()
+                .with_width(line_width)
+                .with_color(IcedColor::from_rgb(0.5, 0.3, 0.1)),
+        );
 
-    
-        
         for offset in 1..total_players {
             let opponent_idx = (current_p_idx + offset) % total_players;
             let card_count = self.game.players[opponent_idx].cards.len();
-            
+
             let cw = 30.0 * scale;
             let ch = 45.0 * scale;
-            
-            let card_orbit_radius = board_radius + (ch / 2.0) + (15.0 * scale); 
 
-         
+            let card_orbit_radius = board_radius + (ch / 2.0) + (15.0 * scale);
+
             let angle_step = std::f32::consts::TAU / (total_players as f32);
             let card_angle = std::f32::consts::FRAC_PI_2 - (offset as f32 * angle_step);
 
             let center_card_pos = Point::new(
                 center.x + card_orbit_radius * card_angle.cos(),
-                center.y + card_orbit_radius * card_angle.sin() 
+                center.y + card_orbit_radius * card_angle.sin(),
             );
 
-         
             let is_horizontal = card_angle.cos().abs() < 0.5;
 
             for c in 0..card_count {
                 let spread = 15.0 * scale;
                 let total_w = (card_count as f32 - 1.0) * spread;
-                
+
                 let pos = if !is_horizontal {
                     let start_y = center_card_pos.y - total_w / 2.0;
                     Point::new(center_card_pos.x, start_y + (c as f32 * spread))
@@ -935,14 +991,25 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
                 };
 
                 let rect = if !is_horizontal {
-                    iced::Rectangle::new(Point::new(pos.x - ch/2.0, pos.y - cw/2.0), iced::Size::new(ch, cw))
+                    iced::Rectangle::new(
+                        Point::new(pos.x - ch / 2.0, pos.y - cw / 2.0),
+                        iced::Size::new(ch, cw),
+                    )
                 } else {
-                    iced::Rectangle::new(Point::new(pos.x - cw/2.0, pos.y - ch/2.0), iced::Size::new(cw, ch))
+                    iced::Rectangle::new(
+                        Point::new(pos.x - cw / 2.0, pos.y - ch / 2.0),
+                        iced::Size::new(cw, ch),
+                    )
                 };
 
                 let back = canvas::Path::rectangle(rect.position(), rect.size());
-                frame.fill(&back, IcedColor::from_rgb(0.2, 0.3, 0.7)); 
-                frame.stroke(&back, canvas::Stroke::default().with_color(IcedColor::WHITE).with_width(2.0 * scale));
+                frame.fill(&back, IcedColor::from_rgb(0.2, 0.3, 0.7));
+                frame.stroke(
+                    &back,
+                    canvas::Stroke::default()
+                        .with_color(IcedColor::WHITE)
+                        .with_width(2.0 * scale),
+                );
             }
         }
 
@@ -963,10 +1030,11 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
         for p_idx in 0..total_players {
             let start_idx = self.game.board.start_field(p_idx);
             let house_start_idx = ring_size + p_idx * 4;
-            
+
             let p_start = get_tile_position(start_idx, total_players, center, scale, rotation);
-            let p_house = get_tile_position(house_start_idx, total_players, center, scale, rotation);
-            
+            let p_house =
+                get_tile_position(house_start_idx, total_players, center, scale, rotation);
+
             let path_entry = canvas::Path::new(|p| {
                 p.move_to(p_start);
                 p.line_to(p_house);
@@ -974,8 +1042,15 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
             frame.stroke(&path_entry, track_stroke.clone());
 
             for k in 0..3 {
-                let h1 = get_tile_position(house_start_idx + k, total_players, center, scale, rotation);
-                let h2 = get_tile_position(house_start_idx + k + 1, total_players, center, scale, rotation);
+                let h1 =
+                    get_tile_position(house_start_idx + k, total_players, center, scale, rotation);
+                let h2 = get_tile_position(
+                    house_start_idx + k + 1,
+                    total_players,
+                    center,
+                    scale,
+                    rotation,
+                );
                 let path_house = canvas::Path::new(|p| {
                     p.move_to(h1);
                     p.line_to(h2);
@@ -998,10 +1073,10 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
         // 4. Felder und Figuren
         for i in 0..total_tiles {
             let pos = get_tile_position(i, total_players, center, scale, rotation);
-            
+
             let mut is_start = false;
             let mut start_mark_color = IcedColor::TRANSPARENT;
-            
+
             for p in 0..total_players {
                 if i == self.game.board.start_field(p) {
                     is_start = true;
@@ -1018,7 +1093,15 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
 
             if is_start {
                 let marker = canvas::Path::circle(pos, 13.0 * scale);
-                frame.fill(&marker, IcedColor::from_rgba(start_mark_color.r, start_mark_color.g, start_mark_color.b, 0.3));
+                frame.fill(
+                    &marker,
+                    IcedColor::from_rgba(
+                        start_mark_color.r,
+                        start_mark_color.g,
+                        start_mark_color.b,
+                        0.3,
+                    ),
+                );
             }
 
             match board_state.get(i).and_then(|t| t.as_ref()) {
@@ -1032,23 +1115,36 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
                         GameColor::Orange => IcedColor::from_rgb(1.0, 0.65, 0.0),
                     };
                     draw_marble(&mut frame, pos, color, scale);
-                },
+                }
                 None => {
-                    let shadow = canvas::Path::circle(Point::new(pos.x + 1.0*scale, pos.y + 1.0*scale), 7.0 * scale);
-                    frame.fill(&shadow, IcedColor::from_rgba(0.0,0.0,0.0,0.2));
-                    
+                    let shadow = canvas::Path::circle(
+                        Point::new(pos.x + 1.0 * scale, pos.y + 1.0 * scale),
+                        7.0 * scale,
+                    );
+                    frame.fill(&shadow, IcedColor::from_rgba(0.0, 0.0, 0.0, 0.2));
+
                     let hole = canvas::Path::circle(pos, 7.0 * scale);
                     frame.fill(&hole, IcedColor::from_rgb(0.4, 0.3, 0.2));
                 }
             };
 
             if self.highlights.contains(&i) {
-                let ghost_fill = IcedColor::from_rgba(current_color_iced.r, current_color_iced.g, current_color_iced.b, 0.4);
+                let ghost_fill = IcedColor::from_rgba(
+                    current_color_iced.r,
+                    current_color_iced.g,
+                    current_color_iced.b,
+                    0.4,
+                );
                 let ghost = canvas::Path::circle(pos, 6.0 * scale);
                 frame.fill(&ghost, ghost_fill);
 
                 let ring = canvas::Path::circle(pos, 11.0 * scale);
-                frame.stroke(&ring, canvas::Stroke::default().with_color(current_color_iced).with_width(3.0 * scale));
+                frame.stroke(
+                    &ring,
+                    canvas::Stroke::default()
+                        .with_color(current_color_iced)
+                        .with_width(3.0 * scale),
+                );
             }
         }
 
@@ -1073,12 +1169,12 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
                 let start_angle = (start_idx as f32) * angle_step + rotation;
 
                 let wait_radius = 295.0 * scale;
-                let marble_spacing = 0.08; 
-                let center_offset = 0.12; 
+                let marble_spacing = 0.08;
+                let center_offset = 0.12;
 
                 for k in 0..count {
                     let offset_angle = start_angle + center_offset - (k as f32 * marble_spacing);
-                    
+
                     let wait_pos = Point::new(
                         center.x + wait_radius * offset_angle.cos(),
                         center.y + wait_radius * offset_angle.sin(),
@@ -1105,37 +1201,49 @@ struct HandView<'a> {
 
 impl<'a> HandView<'a> {
     // Berechnet Layout + Hover Effekt
-    fn get_layout(&self, bounds: iced::Rectangle, cursor_position: Point) -> Vec<(usize, Card, iced::Rectangle, bool)> {
+    fn get_layout(
+        &self,
+        bounds: iced::Rectangle,
+        cursor_position: Point,
+    ) -> Vec<(usize, Card, iced::Rectangle, bool)> {
         let cards = &self.game.current_player().cards;
         let count = cards.len();
-        if count == 0 { return Vec::new(); }
+        if count == 0 {
+            return Vec::new();
+        }
 
-        let scale = 1.0; 
-        
+        let scale = 1.0;
+
         let card_w = 60.0 * scale;
         let card_h = 90.0 * scale;
         let gap = 15.0 * scale;
-        
+
         let total_w = (count as f32 * card_w) + ((count as f32 - 1.0) * gap);
         let start_x = (bounds.width / 2.0) - (total_w / 2.0); // Zentriert
         let base_y = (bounds.height / 2.0) - (card_h / 2.0) + (10.0 * scale);
 
-        cards.iter().enumerate().map(|(i, &card)| {
-            let x = start_x + (i as f32 * (card_w + gap));
-            let mut y = base_y;
+        cards
+            .iter()
+            .enumerate()
+            .map(|(i, &card)| {
+                let x = start_x + (i as f32 * (card_w + gap));
+                let mut y = base_y;
 
-            let base_rect = iced::Rectangle::new(Point::new(x, y), iced::Size::new(card_w, card_h));
-            let is_hovered = base_rect.contains(cursor_position);
-            let is_selected = Some(card) == self.selected_card;
-            
-            if is_hovered || is_selected {
-                y -= 15.0 * scale; 
-            }
+                let base_rect =
+                    iced::Rectangle::new(Point::new(x, y), iced::Size::new(card_w, card_h));
+                let is_hovered = base_rect.contains(cursor_position);
+                let is_selected = Some(card) == self.selected_card;
 
-            let final_rect = iced::Rectangle::new(Point::new(x, y), iced::Size::new(card_w, card_h));
+                if is_hovered || is_selected {
+                    y -= 15.0 * scale;
+                }
 
-            (i, card, final_rect, is_hovered)
-        }).collect()
+                let final_rect =
+                    iced::Rectangle::new(Point::new(x, y), iced::Size::new(card_w, card_h));
+
+                (i, card, final_rect, is_hovered)
+            })
+            .collect()
     }
 }
 
@@ -1149,13 +1257,20 @@ impl<'a> canvas::Program<Message> for HandView<'a> {
         bounds: iced::Rectangle,
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
-        let cursor_position = if let Some(p) = cursor.position_in(bounds) { p } else { return (canvas::event::Status::Ignored, None); };
+        let cursor_position = if let Some(p) = cursor.position_in(bounds) {
+            p
+        } else {
+            return (canvas::event::Status::Ignored, None);
+        };
 
         if let canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) = event {
             let layout = self.get_layout(bounds, cursor_position);
             for (_idx, card, rect, _hovered) in layout.into_iter().rev() {
                 if rect.contains(cursor_position) {
-                    return (canvas::event::Status::Captured, Some(Message::CardSelected(card)));
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::CardSelected(card)),
+                    );
                 }
             }
         }
@@ -1171,38 +1286,57 @@ impl<'a> canvas::Program<Message> for HandView<'a> {
         cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        
+
         let cursor_pos = cursor.position_in(bounds).unwrap_or(Point::new(-1.0, -1.0));
         let layout = self.get_layout(bounds, cursor_pos);
-        
+
         let scale = 1.0;
 
         for (_i, card, rect, is_hovered) in layout {
             let is_selected = Some(card) == self.selected_card;
 
             let bg_path = canvas::Path::rectangle(rect.position(), rect.size());
-            
+
             if is_hovered || is_selected {
-                let shadow_rect = canvas::Path::rectangle(Point::new(rect.x + 3.0*scale, rect.y + 10.0*scale), rect.size());
+                let shadow_rect = canvas::Path::rectangle(
+                    Point::new(rect.x + 3.0 * scale, rect.y + 10.0 * scale),
+                    rect.size(),
+                );
                 frame.fill(&shadow_rect, IcedColor::from_rgba(0.0, 0.0, 0.0, 0.2));
             } else {
-                let shadow_rect = canvas::Path::rectangle(Point::new(rect.x + 1.0*scale, rect.y + 1.0*scale), rect.size());
+                let shadow_rect = canvas::Path::rectangle(
+                    Point::new(rect.x + 1.0 * scale, rect.y + 1.0 * scale),
+                    rect.size(),
+                );
                 frame.fill(&shadow_rect, IcedColor::from_rgba(0.0, 0.0, 0.0, 0.1));
             }
 
-            let bg_color = if card == Card::Joker { IcedColor::from_rgb(1.0, 0.95, 0.95) } else { IcedColor::WHITE };
+            let bg_color = if card == Card::Joker {
+                IcedColor::from_rgb(1.0, 0.95, 0.95)
+            } else {
+                IcedColor::WHITE
+            };
             frame.fill(&bg_path, bg_color);
 
-            let border_color = if is_selected { 
-                IcedColor::from_rgb(0.0, 0.5, 1.0) 
+            let border_color = if is_selected {
+                IcedColor::from_rgb(0.0, 0.5, 1.0)
             } else if is_hovered {
-                IcedColor::from_rgb(0.3, 0.3, 0.3) 
+                IcedColor::from_rgb(0.3, 0.3, 0.3)
             } else {
-                IcedColor::from_rgb(0.7, 0.7, 0.7) 
+                IcedColor::from_rgb(0.7, 0.7, 0.7)
             };
-            let border_width = if is_selected { 3.0 * scale } else { 1.0 * scale };
-            
-            frame.stroke(&bg_path, canvas::Stroke::default().with_color(border_color).with_width(border_width));
+            let border_width = if is_selected {
+                3.0 * scale
+            } else {
+                1.0 * scale
+            };
+
+            frame.stroke(
+                &bg_path,
+                canvas::Stroke::default()
+                    .with_color(border_color)
+                    .with_width(border_width),
+            );
 
             let label = match card {
                 Card::Ace => "A",
@@ -1210,24 +1344,36 @@ impl<'a> canvas::Program<Message> for HandView<'a> {
                 Card::Queen => "Q",
                 Card::Jack => "J",
                 Card::Joker => "JOK",
-                _ => { 
-                    if card.value() == 10 { "10" } else { 
+                _ => {
+                    if card.value() == 10 {
+                        "10"
+                    } else {
                         match card {
-                            Card::Two => "2", Card::Three => "3", Card::Four => "4", 
-                            Card::Five => "5", Card::Six => "6", Card::Seven => "7", 
-                            Card::Eight => "8", Card::Nine => "9", _ => "?" 
+                            Card::Two => "2",
+                            Card::Three => "3",
+                            Card::Four => "4",
+                            Card::Five => "5",
+                            Card::Six => "6",
+                            Card::Seven => "7",
+                            Card::Eight => "8",
+                            Card::Nine => "9",
+                            _ => "?",
                         }
                     }
                 }
             };
-            
-            let text_color = if card == Card::Joker { IcedColor::from_rgb(0.8, 0.0, 0.0) } else { IcedColor::BLACK };
+
+            let text_color = if card == Card::Joker {
+                IcedColor::from_rgb(0.8, 0.0, 0.0)
+            } else {
+                IcedColor::BLACK
+            };
 
             frame.fill_text(canvas::Text {
                 content: label.to_string(),
-                position: Point::new(rect.x + 5.0*scale, rect.y + 5.0*scale),
+                position: Point::new(rect.x + 5.0 * scale, rect.y + 5.0 * scale),
                 color: text_color,
-                size: (12.0*scale).into(),
+                size: (12.0 * scale).into(),
                 ..Default::default()
             });
 
@@ -1243,32 +1389,45 @@ impl<'a> canvas::Program<Message> for HandView<'a> {
 fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, color: IcedColor) {
     let center = rect.center();
     let w = rect.width;
-    
-    let haut = IcedColor::from_rgb(0.98, 0.88, 0.75); 
-    let gold = IcedColor::from_rgb(1.0, 0.8, 0.0);    
-    let blond = IcedColor::from_rgb(0.95, 0.85, 0.3); 
-    let bart_blond = IcedColor::from_rgb(0.85, 0.75, 0.2); 
-    
+
+    let haut = IcedColor::from_rgb(0.98, 0.88, 0.75);
+    let gold = IcedColor::from_rgb(1.0, 0.8, 0.0);
+    let blond = IcedColor::from_rgb(0.95, 0.85, 0.3);
+    let bart_blond = IcedColor::from_rgb(0.85, 0.75, 0.2);
+
     let suit_color = color;
-    let rot = IcedColor::from_rgb(0.85, 0.1, 0.1); 
+    let rot = IcedColor::from_rgb(0.85, 0.1, 0.1);
 
     match card {
         Card::King => {
             let r = w * 0.26;
-            let hair = canvas::Path::new(|p| p.arc(canvas::path::Arc { center, radius: r + 2.0, start_angle: iced::Radians(0.0), end_angle: iced::Radians(6.28) }));
+            let hair = canvas::Path::new(|p| {
+                p.arc(canvas::path::Arc {
+                    center,
+                    radius: r + 2.0,
+                    start_angle: iced::Radians(0.0),
+                    end_angle: iced::Radians(6.28),
+                })
+            });
             frame.fill(&hair, blond);
             let head = canvas::Path::circle(center, r);
             frame.fill(&head, haut);
             frame.stroke(&head, canvas::Stroke::default().with_width(1.5));
             let beard = canvas::Path::new(|p| {
                 p.move_to(Point::new(center.x - r + 2.0, center.y));
-                p.quadratic_curve_to(Point::new(center.x, center.y + r + 15.0), Point::new(center.x + r - 2.0, center.y));
+                p.quadratic_curve_to(
+                    Point::new(center.x, center.y + r + 15.0),
+                    Point::new(center.x + r - 2.0, center.y),
+                );
                 p.close();
             });
             frame.fill(&beard, bart_blond);
             let mustache = canvas::Path::new(|p| {
                 p.move_to(Point::new(center.x - 10.0, center.y + 10.0));
-                p.quadratic_curve_to(Point::new(center.x, center.y + 5.0), Point::new(center.x + 10.0, center.y + 10.0));
+                p.quadratic_curve_to(
+                    Point::new(center.x, center.y + 5.0),
+                    Point::new(center.x + 10.0, center.y + 10.0),
+                );
                 p.line_to(Point::new(center.x, center.y + 8.0));
                 p.close();
             });
@@ -1286,7 +1445,12 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
                 p.close();
             });
             frame.fill(&crown, gold);
-            frame.stroke(&crown, canvas::Stroke::default().with_color(IcedColor::BLACK).with_width(1.5));
+            frame.stroke(
+                &crown,
+                canvas::Stroke::default()
+                    .with_color(IcedColor::BLACK)
+                    .with_width(1.5),
+            );
             draw_eyes(frame, center, 2.0);
         }
         Card::Queen => {
@@ -1296,12 +1460,23 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
                 let bot = center.y + r + 15.0;
                 let wd = r * 2.8;
                 p.move_to(Point::new(center.x, top));
-                p.quadratic_curve_to(Point::new(center.x - wd/1.5, center.y), Point::new(center.x - wd/2.0, bot));
-                p.line_to(Point::new(center.x + wd/2.0, bot));
-                p.quadratic_curve_to(Point::new(center.x + wd/1.5, center.y), Point::new(center.x, top));
+                p.quadratic_curve_to(
+                    Point::new(center.x - wd / 1.5, center.y),
+                    Point::new(center.x - wd / 2.0, bot),
+                );
+                p.line_to(Point::new(center.x + wd / 2.0, bot));
+                p.quadratic_curve_to(
+                    Point::new(center.x + wd / 1.5, center.y),
+                    Point::new(center.x, top),
+                );
             });
             frame.fill(&hair_bg, blond);
-            frame.stroke(&hair_bg, canvas::Stroke::default().with_color(IcedColor::from_rgba(0.0,0.0,0.0,0.2)).with_width(1.0));
+            frame.stroke(
+                &hair_bg,
+                canvas::Stroke::default()
+                    .with_color(IcedColor::from_rgba(0.0, 0.0, 0.0, 0.2))
+                    .with_width(1.0),
+            );
             let head = canvas::Path::circle(center, r);
             frame.fill(&head, haut);
             frame.stroke(&head, canvas::Stroke::default().with_width(1.5));
@@ -1313,24 +1488,48 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
                 p.close();
             });
             frame.fill(&tiara, gold);
-            frame.stroke(&tiara, canvas::Stroke::default().with_color(IcedColor::BLACK).with_width(1.0));
+            frame.stroke(
+                &tiara,
+                canvas::Stroke::default()
+                    .with_color(IcedColor::BLACK)
+                    .with_width(1.0),
+            );
             draw_eyes(frame, center, 1.8);
             let lips = canvas::Path::new(|p| {
-                 p.move_to(Point::new(center.x - 4.0, center.y + 10.0));
-                 p.quadratic_curve_to(Point::new(center.x, center.y + 13.0), Point::new(center.x + 4.0, center.y + 10.0));
+                p.move_to(Point::new(center.x - 4.0, center.y + 10.0));
+                p.quadratic_curve_to(
+                    Point::new(center.x, center.y + 13.0),
+                    Point::new(center.x + 4.0, center.y + 10.0),
+                );
             });
-            frame.stroke(&lips, canvas::Stroke::default().with_color(IcedColor::from_rgb(0.8, 0.2, 0.2)).with_width(2.0));
+            frame.stroke(
+                &lips,
+                canvas::Stroke::default()
+                    .with_color(IcedColor::from_rgb(0.8, 0.2, 0.2))
+                    .with_width(2.0),
+            );
         }
         Card::Jack => {
             let r = w * 0.23;
             let hair = canvas::Path::new(|p| {
                 p.move_to(Point::new(center.x, center.y - r));
-                p.quadratic_curve_to(Point::new(center.x - r - 8.0, center.y), Point::new(center.x - r, center.y + r));
+                p.quadratic_curve_to(
+                    Point::new(center.x - r - 8.0, center.y),
+                    Point::new(center.x - r, center.y + r),
+                );
                 p.line_to(Point::new(center.x + r, center.y + r));
-                p.quadratic_curve_to(Point::new(center.x + r + 8.0, center.y), Point::new(center.x, center.y - r));
+                p.quadratic_curve_to(
+                    Point::new(center.x + r + 8.0, center.y),
+                    Point::new(center.x, center.y - r),
+                );
             });
             frame.fill(&hair, blond);
-            frame.stroke(&hair, canvas::Stroke::default().with_color(IcedColor::from_rgba(0.0,0.0,0.0,0.3)).with_width(1.0));
+            frame.stroke(
+                &hair,
+                canvas::Stroke::default()
+                    .with_color(IcedColor::from_rgba(0.0, 0.0, 0.0, 0.3))
+                    .with_width(1.0),
+            );
             let head = canvas::Path::circle(center, r);
             frame.fill(&head, haut);
             frame.stroke(&head, canvas::Stroke::default().with_width(1.5));
@@ -1338,43 +1537,88 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
                 let y = center.y - r * 0.6;
                 let hw = r * 2.6;
                 p.move_to(Point::new(center.x - hw / 2.0, y));
-                p.quadratic_curve_to(Point::new(center.x, y - 5.0), Point::new(center.x + hw / 2.0, y));
-                p.quadratic_curve_to(Point::new(center.x + hw / 2.0 + 5.0, y - 10.0), Point::new(center.x, y - 15.0));
-                p.quadratic_curve_to(Point::new(center.x - hw / 2.0 - 5.0, y - 10.0), Point::new(center.x - hw / 2.0, y));
+                p.quadratic_curve_to(
+                    Point::new(center.x, y - 5.0),
+                    Point::new(center.x + hw / 2.0, y),
+                );
+                p.quadratic_curve_to(
+                    Point::new(center.x + hw / 2.0 + 5.0, y - 10.0),
+                    Point::new(center.x, y - 15.0),
+                );
+                p.quadratic_curve_to(
+                    Point::new(center.x - hw / 2.0 - 5.0, y - 10.0),
+                    Point::new(center.x - hw / 2.0, y),
+                );
                 p.close();
             });
             frame.fill(&hat, suit_color);
             let feather = canvas::Path::new(|p| {
                 let y = center.y - r * 0.6 - 10.0;
                 p.move_to(Point::new(center.x + 10.0, y));
-                p.quadratic_curve_to(Point::new(center.x + 25.0, y - 20.0), Point::new(center.x + 15.0, y - 25.0));
-                p.quadratic_curve_to(Point::new(center.x + 15.0, y - 10.0), Point::new(center.x + 10.0, y));
+                p.quadratic_curve_to(
+                    Point::new(center.x + 25.0, y - 20.0),
+                    Point::new(center.x + 15.0, y - 25.0),
+                );
+                p.quadratic_curve_to(
+                    Point::new(center.x + 15.0, y - 10.0),
+                    Point::new(center.x + 10.0, y),
+                );
             });
             frame.fill(&feather, IcedColor::WHITE);
-            frame.stroke(&feather, canvas::Stroke::default().with_color(IcedColor::BLACK).with_width(1.0));
+            frame.stroke(
+                &feather,
+                canvas::Stroke::default()
+                    .with_color(IcedColor::BLACK)
+                    .with_width(1.0),
+            );
             draw_eyes(frame, center, 2.0);
             let smile = canvas::Path::new(|p| {
                 p.move_to(Point::new(center.x - 5.0, center.y + 8.0));
-                p.quadratic_curve_to(Point::new(center.x, center.y + 10.0), Point::new(center.x + 5.0, center.y + 8.0));
+                p.quadratic_curve_to(
+                    Point::new(center.x, center.y + 10.0),
+                    Point::new(center.x + 5.0, center.y + 8.0),
+                );
             });
-            frame.stroke(&smile, canvas::Stroke::default().with_color(IcedColor::BLACK).with_width(1.5));
+            frame.stroke(
+                &smile,
+                canvas::Stroke::default()
+                    .with_color(IcedColor::BLACK)
+                    .with_width(1.5),
+            );
         }
         Card::Joker => {
             let r = w * 0.22;
             let head = canvas::Path::circle(center, r);
-            frame.fill(&head, IcedColor::WHITE); 
+            frame.fill(&head, IcedColor::WHITE);
             frame.stroke(&head, canvas::Stroke::default().with_width(1.5));
             let cap = canvas::Path::new(|p| {
                 let y = center.y - r * 0.6;
                 p.move_to(Point::new(center.x - r, y));
                 p.line_to(Point::new(center.x + r, y));
-                p.quadratic_curve_to(Point::new(center.x + r + 15.0, y - 10.0), Point::new(center.x + r + 5.0, y + 10.0));
-                p.quadratic_curve_to(Point::new(center.x + 10.0, y - 25.0), Point::new(center.x, y));
-                p.quadratic_curve_to(Point::new(center.x - 10.0, y - 25.0), Point::new(center.x - r - 5.0, y + 10.0));
-                p.quadratic_curve_to(Point::new(center.x - r - 15.0, y - 10.0), Point::new(center.x - r, y));
+                p.quadratic_curve_to(
+                    Point::new(center.x + r + 15.0, y - 10.0),
+                    Point::new(center.x + r + 5.0, y + 10.0),
+                );
+                p.quadratic_curve_to(
+                    Point::new(center.x + 10.0, y - 25.0),
+                    Point::new(center.x, y),
+                );
+                p.quadratic_curve_to(
+                    Point::new(center.x - 10.0, y - 25.0),
+                    Point::new(center.x - r - 5.0, y + 10.0),
+                );
+                p.quadratic_curve_to(
+                    Point::new(center.x - r - 15.0, y - 10.0),
+                    Point::new(center.x - r, y),
+                );
             });
             frame.fill(&cap, rot);
-            frame.stroke(&cap, canvas::Stroke::default().with_color(IcedColor::BLACK).with_width(1.0));
+            frame.stroke(
+                &cap,
+                canvas::Stroke::default()
+                    .with_color(IcedColor::BLACK)
+                    .with_width(1.0),
+            );
             let y = center.y - r * 0.6;
             let bell_l = canvas::Path::circle(Point::new(center.x - r - 5.0, y + 10.0), 3.0);
             let bell_r = canvas::Path::circle(Point::new(center.x + r + 5.0, y + 10.0), 3.0);
@@ -1386,22 +1630,30 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
             let smile = canvas::Path::new(|p| {
                 p.move_to(Point::new(center.x - 8.0, center.y + 7.0));
                 p.quadratic_curve_to(
-                    Point::new(center.x, center.y + 11.0), 
-                    Point::new(center.x + 8.0, center.y + 7.0)
+                    Point::new(center.x, center.y + 11.0),
+                    Point::new(center.x + 8.0, center.y + 7.0),
                 );
             });
-            frame.stroke(&smile, canvas::Stroke::default().with_color(IcedColor::BLACK).with_width(2.0));
+            frame.stroke(
+                &smile,
+                canvas::Stroke::default()
+                    .with_color(IcedColor::BLACK)
+                    .with_width(2.0),
+            );
         }
         Card::Four => {
             let arrow = canvas::Path::new(|p| {
                 let sz = 15.0;
-                p.move_to(Point::new(center.x + sz, center.y)); 
+                p.move_to(Point::new(center.x + sz, center.y));
                 p.line_to(Point::new(center.x - sz + 5.0, center.y));
                 p.move_to(Point::new(center.x - sz + 10.0, center.y - 8.0));
                 p.line_to(Point::new(center.x - sz, center.y));
                 p.line_to(Point::new(center.x - sz + 10.0, center.y + 8.0));
             });
-            frame.stroke(&arrow, canvas::Stroke::default().with_color(color).with_width(4.0));
+            frame.stroke(
+                &arrow,
+                canvas::Stroke::default().with_color(color).with_width(4.0),
+            );
         }
         Card::Seven => {
             let scissors = canvas::Path::new(|p| {
@@ -1410,18 +1662,27 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
                 p.move_to(Point::new(center.x + 10.0, center.y + 15.0));
                 p.line_to(Point::new(center.x - 10.0, center.y - 15.0));
             });
-            frame.stroke(&scissors, canvas::Stroke::default().with_color(color).with_width(3.0));
+            frame.stroke(
+                &scissors,
+                canvas::Stroke::default().with_color(color).with_width(3.0),
+            );
             let handle_l = canvas::Path::circle(Point::new(center.x - 10.0, center.y + 18.0), 4.0);
             let handle_r = canvas::Path::circle(Point::new(center.x + 10.0, center.y + 18.0), 4.0);
-            frame.stroke(&handle_l, canvas::Stroke::default().with_color(color).with_width(2.0));
-            frame.stroke(&handle_r, canvas::Stroke::default().with_color(color).with_width(2.0));
+            frame.stroke(
+                &handle_l,
+                canvas::Stroke::default().with_color(color).with_width(2.0),
+            );
+            frame.stroke(
+                &handle_r,
+                canvas::Stroke::default().with_color(color).with_width(2.0),
+            );
         }
         Card::Ace => {
             frame.fill_text(canvas::Text {
                 content: "A".to_string(),
                 position: center,
                 color,
-                size: 40.0.into(), 
+                size: 40.0.into(),
                 horizontal_alignment: iced::alignment::Horizontal::Center,
                 vertical_alignment: iced::alignment::Vertical::Center,
                 ..Default::default()
@@ -1436,13 +1697,13 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
                 Card::Five => "5",
                 Card::Three => "3",
                 Card::Two => "2",
-                _ => ""
+                _ => "",
             };
             frame.fill_text(canvas::Text {
                 content: label.to_string(),
                 position: center,
                 color,
-                size: 32.0.into(), 
+                size: 32.0.into(),
                 horizontal_alignment: iced::alignment::Horizontal::Center,
                 vertical_alignment: iced::alignment::Vertical::Center,
                 ..Default::default()
@@ -1460,11 +1721,19 @@ fn draw_eyes(frame: &mut canvas::Frame, center: Point, sz: f32) {
 
 fn draw_marble(frame: &mut canvas::Frame, center: Point, color: IcedColor, scale: f32) {
     let radius = 10.0 * scale;
-    let shadow = canvas::Path::circle(Point::new(center.x + 2.0*scale, center.y + 2.0*scale), radius);
+    let shadow = canvas::Path::circle(
+        Point::new(center.x + 2.0 * scale, center.y + 2.0 * scale),
+        radius,
+    );
     frame.fill(&shadow, IcedColor::from_rgba(0.0, 0.0, 0.0, 0.3));
     let body = canvas::Path::circle(center, radius);
     frame.fill(&body, color);
-    frame.stroke(&body, canvas::Stroke::default().with_color(IcedColor::from_rgba(0.0,0.0,0.0,0.2)).with_width(1.0 * scale));
+    frame.stroke(
+        &body,
+        canvas::Stroke::default()
+            .with_color(IcedColor::from_rgba(0.0, 0.0, 0.0, 0.2))
+            .with_width(1.0 * scale),
+    );
     let shine_pos = Point::new(center.x - radius * 0.3, center.y - radius * 0.3);
     let shine = canvas::Path::circle(shine_pos, radius * 0.4);
     frame.fill(&shine, IcedColor::from_rgba(1.0, 1.0, 1.0, 0.4));
