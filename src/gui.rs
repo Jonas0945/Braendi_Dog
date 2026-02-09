@@ -49,11 +49,13 @@ enum GameAction {
     Grab,
     Interchange,
     TradeGrab,
+    Split,
 }
 
 #[derive(Debug, Clone)]
 enum PendingAction {
     Move { from: Option<usize> },
+    Split { from: Option<usize> },
     Interchange { from: Option<usize> },
     Grab,
     TradeGrab,
@@ -267,58 +269,40 @@ impl DogApp {
     }
 
     fn get_possible_moves(&self) -> Vec<usize> {
-        let (
-            Some(game),
-            Some(PendingAction::Move {
-                from: Some(from_idx),
-            }),
-            Some(card),
-        ) = (&self.game, &self.pending_action, self.selected_card)
+        let (Some(game), Some(pending), Some(card)) =
+            (&self.game, &self.pending_action, self.selected_card)
         else {
             return vec![];
         };
 
-        let mut distances: Vec<i8> = card
-            .possible_distances()
-            .into_iter()
-            .map(|x| x as i8)
-            .collect();
-
-        if matches!(card, Card::Joker | Card::Four) {
-            distances.push(-4);
-        }
+        let from_idx = match pending {
+            PendingAction::Move { from: Some(i) } | PendingAction::Split { from: Some(i) } => *i,
+            _ => return vec![],
+        };
 
         let legal_actions = generator::generate_all_legal_actions(game);
 
         let mut result = Vec::new();
 
-        for dist in distances {
-            let backward = dist < 0;
-            let abs_dist = dist.abs() as u8;
-
-            if !game.can_piece_move_distance(*from_idx, abs_dist, backward) {
+        for action in legal_actions {
+            if action.card != Some(card) {
                 continue;
             }
 
-            for action in &legal_actions {
-                let to = match action.action {
-                    ActionKind::Move { to, .. } | ActionKind::Split { to, .. } => to,
-                    _ => continue,
-                };
-
-                let ok = if backward {
-                    game.board
-                        .distance_between(to, *from_idx, game.current_player_index)
-                        == Some(abs_dist)
-                } else {
-                    game.board
-                        .distance_between(*from_idx, to, game.current_player_index)
-                        == Some(abs_dist)
-                };
-
-                if ok {
-                    result.push(to);
+            match (&pending, &action.action) {
+                (PendingAction::Move { .. }, ActionKind::Move { from, to })
+                    if *from == from_idx =>
+                {
+                    result.push(*to);
                 }
+
+                (PendingAction::Split { .. }, ActionKind::Split { from, to })
+                    if *from == from_idx =>
+                {
+                    result.push(*to);
+                }
+
+                _ => {}
             }
         }
 
@@ -557,6 +541,9 @@ impl DogApp {
         let has_move = legal_actions
             .iter()
             .any(|a| matches!(a.action, ActionKind::Move { .. }));
+        let has_split = legal_actions
+            .iter()
+            .any(|a| matches!(a.action, ActionKind::Split { .. }));
 
         let has_place = legal_actions
             .iter()
@@ -589,6 +576,18 @@ impl DogApp {
                 btns = btns.push(
                     button(text("Ziehen (Move)").size(font_std))
                         .on_press(Message::GameActionBtn(GameAction::Move))
+                        .width(Length::Fill),
+                );
+            }
+            if has_split {
+                let label = match game.split_rest {
+                    None | Some(0) => "Aufteilen (Split)".to_string(),
+                    Some(n) => format!("Aufteilen (Split) ({})", n),
+                };
+
+                btns = btns.push(
+                    button(text(label).size(font_std))
+                        .on_press(Message::GameActionBtn(GameAction::Split))
                         .width(Length::Fill),
                 );
             }
@@ -707,10 +706,13 @@ impl DogApp {
                     game.players[prev_idx].color
                 );
             }
-
+            GameAction::Split => {
+                self.pending_action = Some(PendingAction::Split { from: None });
+                self.msg = "Wähle Figur (Start) (Split)".into();
+            }
             GameAction::Move => {
                 self.pending_action = Some(PendingAction::Move { from: None });
-                self.msg = "Wähle Figur (Start).".into();
+                self.msg = "Wähle Figur (Start) (Move)".into();
             }
             GameAction::Interchange => {
                 self.pending_action = Some(PendingAction::Interchange { from: None });
@@ -765,6 +767,24 @@ impl DogApp {
                 PendingAction::Grab | PendingAction::TradeGrab => {
                     self.msg = "Wähle einen Gegner und eine Karte oben.".into();
                 }
+                PendingAction::Split { from } => {
+                    if let Some(start_idx) = from {
+                        let act = Action {
+                            player: current_color,
+                            card: Some(card),
+                            action: ActionKind::Split {
+                                from: start_idx,
+                                to: tile_idx,
+                            },
+                        };
+                        self.do_action(card, act);
+                    } else {
+                        self.pending_action = Some(PendingAction::Split {
+                            from: Some(tile_idx),
+                        });
+                        self.msg = format!("Start: {}. Wähle Ziel! (Split)", tile_idx);
+                    }
+                }
                 PendingAction::Move { from } => {
                     if let Some(start_idx) = from {
                         let act = Action {
@@ -780,7 +800,7 @@ impl DogApp {
                         self.pending_action = Some(PendingAction::Move {
                             from: Some(tile_idx),
                         });
-                        self.msg = format!("Start: {}. Wähle Ziel!", tile_idx);
+                        self.msg = format!("Start: {}. Wähle Ziel! (Move)", tile_idx);
                     }
                 }
                 PendingAction::Interchange { from } => match from {
