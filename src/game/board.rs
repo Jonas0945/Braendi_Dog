@@ -9,7 +9,7 @@ use super::piece::Piece;
 pub type Point = usize; // 0–79
 pub const HOUSE_SIZE: usize = 4;
 pub const SEGMENT_LENGTH: usize = 16;
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 
 pub struct Board {
     pub tiles: Vec<Option<Piece>>,

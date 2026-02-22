@@ -12,7 +12,7 @@ use super::history::*;
 
 const CARDS_PER_ROUND: [u8;5] = [6,5,4,3,2];
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum GameVariant {
     TwoVsTwo,
     ThreeVsThree,
@@ -21,7 +21,7 @@ pub enum GameVariant {
 }
 
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Game {
     pub game_variant: GameVariant,
     pub board: Board,
