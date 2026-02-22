@@ -20,11 +20,11 @@ pub enum ClientNachricht {
     quit
 }
 //informiert Client um Gui zu aktualisieren
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type", content = "data")]
 pub enum ServerNachrich{
     Fehler(String),
-    Info(String),
+   // Info(String),
     State(Game),
 }
 
