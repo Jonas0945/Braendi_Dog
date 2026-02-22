@@ -1,9 +1,12 @@
-use iced::widget::{Button, Container, Row, Text};
-use iced::widget::{button, canvas, column, container, pick_list, row, text, text_input};
+use iced::widget::{button, canvas, column, container, pick_list, row, scrollable, text, text_input};
 use iced::{
     event, executor, mouse, window, Application, Color as IcedColor, Command, Element, Length,
     Point, Renderer, Settings, Size, Subscription, Theme,
 };
+use std::time::Instant;
+use std::fs::File;
+use std::io::BufReader;
+use rodio::{Decoder, OutputStream, Sink, Source}; 
 
 use braendi_dog::{Action, ActionKind, Card, Color as GameColor, DogGame, Game, GameVariant};
 
@@ -62,6 +65,28 @@ enum PendingAction {
 enum Screen {
     Start,
     Game,
+    Rules,
+    GameOver { winner: GameColor }, 
+}
+
+#[derive(Debug, Clone)]
+struct MoveAnimation {
+    from: usize,
+    to: usize,
+    color: IcedColor,
+    progress: f32, 
+}
+
+#[derive(Debug, Clone)]
+struct Confetti {
+    x: f32,
+    y: f32,
+    vx: f32,
+    vy: f32,
+    color: IcedColor,
+    size: f32,
+    rotation: f32,
+    rot_speed: f32,
 }
 
 struct DogApp {
@@ -79,14 +104,26 @@ struct DogApp {
 
     selected_opponent: Option<usize>,
     selected_opponent_card: Option<usize>,
+
+    animation: Option<MoveAnimation>,
+    last_tick: Instant,
+
+    confetti: Vec<Confetti>,
+
+    _audio_stream: Option<OutputStream>, 
+    audio_sink: Option<Sink>,            
 }
 
 #[derive(Debug, Clone)]
 enum Message {
     WindowResized(Size),
+    Tick(Instant),
     VariantSelected(GameVariantKind),
     FreeForAllPlayersChanged(String),
     StartGame,
+
+    ShowRules,
+    BackToStart,
 
     CardSelected(Card),
     BoardClicked(usize),
@@ -106,22 +143,31 @@ impl Application for DogApp {
     type Flags = ();
 
     fn new(_flags: ()) -> (Self, Command<Message>) {
-        (
-            DogApp {
-                game: None,
-                screen: Screen::Start,
-                window_size: Size::new(1024.0, 768.0),
-                selected_variant: None,
-                ffa_players_input: String::new(),
-                selected_card: None,
-                pending_action: None,
-                msg: String::from("Willkommen! Wähle einen Spielmodus."),
+        let mut app = DogApp {
+            game: None,
+            screen: Screen::Start,
+            window_size: Size::new(1024.0, 768.0),
+            selected_variant: None,
+            ffa_players_input: String::new(),
+            selected_card: None,
+            pending_action: None,
+            msg: String::from("Willkommen! Wähle einen Spielmodus."),
 
-                selected_opponent: None,
-                selected_opponent_card: None,
-            },
-            Command::none(),
-        )
+            selected_opponent: None,
+            selected_opponent_card: None,
+
+            animation: None,
+            last_tick: Instant::now(),
+            
+            confetti: Vec::new(),
+
+            _audio_stream: None,
+            audio_sink: None,
+        };
+
+        app.play_audio("lobby.mp3", 0.15, true);
+
+        (app, Command::none())
     }
 
     fn title(&self) -> String {
@@ -129,13 +175,24 @@ impl Application for DogApp {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        event::listen().map(|event| {
+        let resize_sub = event::listen().map(|event| {
             if let iced::Event::Window(_, window::Event::Resized { width, height }) = event {
                 Message::WindowResized(Size::new(width as f32, height as f32))
             } else {
                 Message::None
             }
-        })
+        });
+
+        let needs_tick = self.animation.is_some() || matches!(self.screen, Screen::GameOver { .. });
+
+        if needs_tick {
+            Subscription::batch(vec![
+                resize_sub,
+                window::frames().map(|_| Message::Tick(Instant::now())),
+            ])
+        } else {
+            resize_sub
+        }
     }
 
     fn update(&mut self, message: Message) -> Command<Message> {
@@ -144,6 +201,44 @@ impl Application for DogApp {
             Message::WindowResized(size) => {
                 self.window_size = size;
             }
+            Message::Tick(now) => {
+                let delta = now.duration_since(self.last_tick).as_secs_f32();
+                self.last_tick = now;
+
+                if let Some(anim) = &mut self.animation {
+                    let animation_duration = 0.4; 
+                    anim.progress += delta / animation_duration;
+                    
+                    if anim.progress >= 1.0 {
+                        self.animation = None; 
+                    }
+                }
+
+                if matches!(self.screen, Screen::GameOver { .. }) {
+                    for c in &mut self.confetti {
+                        c.x += c.vx * delta * 60.0;
+                        c.y += c.vy * delta * 60.0;
+                        c.rotation += c.rot_speed * delta * 60.0;
+
+                        c.vx += (rand::random::<f32>() - 0.5) * 0.2;
+                        
+                        if c.y > self.window_size.height + 50.0 {
+                            c.y = -50.0;
+                            c.x = rand::random::<f32>() * self.window_size.width;
+                        }
+                    }
+                }
+            }
+
+            Message::ShowRules => {
+                self.screen = Screen::Rules;
+            }
+            Message::BackToStart => {
+                self.screen = Screen::Start;
+                self.game = None; 
+                self.play_audio("lobby.mp3", 0.15, true);
+            }
+
             Message::OpponentSelected(idx) => {
                 self.selected_opponent = Some(idx);
                 self.selected_opponent_card = None;
@@ -225,11 +320,66 @@ impl Application for DogApp {
         match self.screen {
             Screen::Start => self.render_start(),
             Screen::Game => self.render_game(),
+            Screen::Rules => self.render_rules(),
+            Screen::GameOver { winner } => self.render_game_over(winner),
         }
     }
 }
 
 impl DogApp {
+    fn play_audio(&mut self, filename: &str, volume: f32, loop_audio: bool) {
+        if let Ok((stream, stream_handle)) = OutputStream::try_default() {
+            if let Ok(sink) = Sink::try_new(&stream_handle) {
+                if let Ok(file) = File::open(filename) {
+                    let reader = BufReader::new(file);
+                    if let Ok(source) = Decoder::new(reader) {
+                        sink.set_volume(volume);
+                        if loop_audio {
+                            sink.append(source.repeat_infinite());
+                        } else {
+                            sink.append(source);
+                        }
+                        sink.play();
+
+                        self._audio_stream = Some(stream);
+                        self.audio_sink = Some(sink);
+                    }
+                }
+            }
+        }
+    }
+
+    fn trigger_win(&mut self, winner: GameColor) {
+        self.screen = Screen::GameOver { winner };
+        self.animation = None;
+        self.last_tick = Instant::now();
+
+        self.play_audio("win.mp3", 0.05, false);
+
+        self.confetti.clear();
+        for _ in 0..150 {
+            let color = match rand::random::<u8>() % 6 {
+                0 => IcedColor::from_rgb(0.9, 0.2, 0.2), 
+                1 => IcedColor::from_rgb(0.2, 0.9, 0.2), 
+                2 => IcedColor::from_rgb(0.2, 0.4, 1.0), 
+                3 => IcedColor::from_rgb(0.9, 0.9, 0.2), 
+                4 => IcedColor::from_rgb(0.8, 0.2, 0.8), 
+                _ => IcedColor::from_rgb(1.0, 0.5, 0.0), 
+            };
+
+            self.confetti.push(Confetti {
+                x: rand::random::<f32>() * 2000.0, 
+                y: rand::random::<f32>() * -1000.0, 
+                vx: (rand::random::<f32>() - 0.5) * 4.0, 
+                vy: 2.0 + rand::random::<f32>() * 4.0,   
+                color,
+                size: 8.0 + rand::random::<f32>() * 8.0,
+                rotation: rand::random::<f32>() * std::f32::consts::TAU,
+                rot_speed: (rand::random::<f32>() - 0.5) * 0.2,
+            });
+        }
+    }
+
     fn execute_grab(&mut self, trade: bool) {
         let Some(card) = self.selected_card else {
             self.msg = "Keine Karte gewählt!".into();
@@ -336,26 +486,22 @@ impl DogApp {
         }
     }
 
-   fn render_start(&self) -> Element<'_, Message> {
-        // 1. Der "gemalte" Titel
+    fn render_start(&self) -> Element<'_, Message> {
         let title = text("Brändi Dog")
             .size(80)
-            .style(IcedColor::from_rgb(0.9, 0.75, 0.2)) // Goldenes Gelb
+            .style(IcedColor::from_rgb(0.9, 0.75, 0.2)) 
             .horizontal_alignment(iced::alignment::Horizontal::Center);
 
-        // Subtitel für etwas mehr Flair
         let subtitle = text("Willkommen am Spieltisch")
             .size(22)
-            .style(IcedColor::from_rgb(0.7, 0.7, 0.7)) // Leichtes Grau
+            .style(IcedColor::from_rgb(0.7, 0.7, 0.7)) 
             .horizontal_alignment(iced::alignment::Horizontal::Center);
 
-        // NEU: Aufforderungs-Text
         let instruction = text("Bitte Spielmodus wählen:")
             .size(18)
             .style(IcedColor::WHITE)
             .horizontal_alignment(iced::alignment::Horizontal::Center);
 
-        // 2. Das Dropdown-Menü
         let dropdown = pick_list(
             &GameVariantKind::ALL[..],
             self.selected_variant,
@@ -365,12 +511,10 @@ impl DogApp {
         .width(Length::Fixed(300.0))
         .padding(15); 
 
-        // 3. Spalte für die Steuerelemente (Jetzt mit dem Instruction-Text)
         let mut controls = column![instruction, dropdown]
-            .spacing(10) // Kleinerer Abstand zwischen Text und Dropdown, damit sie zusammengehören
+            .spacing(10)
             .align_items(iced::Alignment::Center);
 
-        // Wenn FreeForAll gewählt ist, zeige das Textfeld
         if self.selected_variant == Some(GameVariantKind::FreeForAll) {
             let ffa_input = text_input("Anzahl Spieler (2-6)", &self.ffa_players_input)
                 .on_input(Message::FreeForAllPlayersChanged)
@@ -390,14 +534,25 @@ impl DogApp {
         .padding([15, 50])
         .on_press_maybe(can_start.then_some(Message::StartGame));
 
+        let rules_btn = button(
+            text("Spielregeln")
+                .size(20)
+                .horizontal_alignment(iced::alignment::Horizontal::Center)
+        )
+        .padding([10, 40])
+        .style(iced::theme::Button::Secondary)
+        .on_press(Message::ShowRules);
+
         controls = controls.push(iced::widget::Space::with_height(Length::Fixed(30.0)));
         controls = controls.push(start_btn);
+        controls = controls.push(iced::widget::Space::with_height(Length::Fixed(10.0)));
+        controls = controls.push(rules_btn);
 
         let menu_card = container(
             column![
                 title,
                 subtitle,
-                iced::widget::Space::with_height(Length::Fixed(50.0)), 
+                iced::widget::Space::with_height(Length::Fixed(50.0)),
                 controls,
             ]
             .align_items(iced::Alignment::Center) 
@@ -425,19 +580,186 @@ impl DogApp {
             .into()
     }
 
+    fn render_rules(&self) -> Element<'_, Message> {
+        let title = text("Spielregeln")
+            .size(50)
+            .style(IcedColor::from_rgb(0.9, 0.75, 0.2))
+            .horizontal_alignment(iced::alignment::Horizontal::Center)
+            .width(Length::Fill); 
+        //Regelwerk wurde mit KI geschrieben 
+        let rules_text_content = 
+            "Ziel des Spiels:\n\
+            Bringe alle eigenen Murmeln (und die deines Teampartners) vom Zwinger sicher in den Zielbereich (Haus).\n\n\
+            Karten und ihre Bedeutung:\n\
+            • Ass, König, Joker: Ermöglicht das Setzen einer Figur aus dem Zwinger auf das Startfeld. Das Startfeld ist danach blockiert und schützt diese Figur.\n\
+            • 4: Genau 4 Felder rückwärts fahren. Man darf hiermit jedoch nicht rückwärts ins eigene Haus einziehen!\n\
+            • 7: Aufteilen (Split). Die 7 Schritte dürfen auf beliebig viele eigene Figuren (oder die des Partners, wenn man im Haus ist) aufgeteilt werden. Überspringt man mit der 7 eine andere Figur, wird diese geschlagen (abgeräumt).\n\
+            • Bube (Jack): Tauscht die Position einer eigenen mit einer gegnerischen Figur. Figuren auf Start- oder Hausfeldern dürfen nicht getauscht werden.\n\
+            • Joker: Kann als eine beliebige andere Karte gespielt werden.\n\
+            • Alle anderen Zahlenkarten (2, 3, 5, 6, 8, 9, 10, Dame/12): Genau diese Anzahl Felder vorwärts ziehen.\n\n\
+            Spielablauf:\n\
+            1. Karten tauschen (nur in Team-Modi): Zu Beginn jeder Runde tauschen die Teampartner blind eine Karte aus.\n\
+            2. Reihum wird jeweils eine Karte ausgespielt und der entsprechende Zug ausgeführt.\n\
+            3. Wer nicht ziehen kann, MUSS eine Karte abwerfen (Remove).\n\n\
+            Schlagen:\n\
+            Landet deine Figur exakt auf einem Feld, das bereits besetzt ist (egal ob Gegner oder eigenes Team), wird die dortige Figur geschlagen und muss zurück in den Zwinger.";
+
+        let rules_text = text(rules_text_content)
+            .size(18)
+            .style(IcedColor::from_rgb(0.9, 0.9, 0.9))
+            .width(Length::Fill);
+
+        let scrollable_content = scrollable(rules_text)
+            .height(Length::Fill);
+
+        let back_btn = container(
+            button(
+                text("Zurück zum Menü")
+                    .size(20)
+                    .horizontal_alignment(iced::alignment::Horizontal::Center)
+            )
+            .padding([10, 40])
+            .style(iced::theme::Button::Destructive)
+            .on_press(Message::BackToStart)
+        )
+        .width(Length::Fill)
+        .center_x(); 
+
+        let content = column![
+            title,
+            iced::widget::Space::with_height(Length::Fixed(20.0)),
+            scrollable_content,
+            iced::widget::Space::with_height(Length::Fixed(20.0)),
+            back_btn
+        ]
+        .padding(40);
+
+        let rules_card = container(content)
+            .width(Length::Fixed(850.0)) 
+            .height(Length::FillPortion(8))
+            .style(|_: &Theme| container::Appearance {
+                background: Some(iced::Background::Color(IcedColor::from_rgba(0.0, 0.0, 0.0, 0.7))),
+                border: iced::Border {
+                    radius: 20.0.into(),
+                    width: 3.0,
+                    color: IcedColor::from_rgb(0.6, 0.4, 0.2),
+                },
+                ..Default::default()
+            });
+
+        container(rules_card)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x()
+            .center_y()
+            .padding(40)
+            .style(|_: &Theme| container::Appearance {
+                background: Some(iced::Background::Color(IcedColor::from_rgb(0.1, 0.3, 0.2))),
+                ..Default::default()
+            })
+            .into()
+    }
+
+    fn render_game_over(&self, winner: GameColor) -> Element<'_, Message> {
+        let confetti_canvas = canvas(ConfettiView {
+            confetti: &self.confetti,
+        })
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+        let (color_name, glow_color) = match winner {
+            GameColor::Red => ("TEAM ROT", IcedColor::from_rgb(1.0, 0.3, 0.3)),
+            GameColor::Green => ("TEAM GRÜN", IcedColor::from_rgb(0.3, 1.0, 0.3)),
+            GameColor::Blue => ("TEAM BLAU", IcedColor::from_rgb(0.3, 0.5, 1.0)),
+            GameColor::Yellow => ("TEAM GELB", IcedColor::from_rgb(1.0, 1.0, 0.3)),
+            GameColor::Purple => ("TEAM LILA", IcedColor::from_rgb(0.8, 0.3, 1.0)),
+            GameColor::Orange => ("TEAM ORANGE", IcedColor::from_rgb(1.0, 0.6, 0.2)),
+        };
+
+        let congrats_text = text("HERZLICHEN GLÜCKWUNSCH!")
+            .size(40)
+            .style(IcedColor::WHITE)
+            .horizontal_alignment(iced::alignment::Horizontal::Center);
+
+        let winner_text = text(format!("{} HAT GEWONNEN!", color_name))
+            .size(70)
+            .style(glow_color)
+            .horizontal_alignment(iced::alignment::Horizontal::Center);
+
+        let back_btn = button(
+            text("Zurück zum Hauptmenü")
+                .size(24)
+                .horizontal_alignment(iced::alignment::Horizontal::Center)
+        )
+        .padding([15, 50])
+        .style(iced::theme::Button::Primary)
+        .on_press(Message::BackToStart);
+
+        let overlay_card = container(
+            column![
+                congrats_text,
+                iced::widget::Space::with_height(Length::Fixed(20.0)),
+                winner_text,
+                iced::widget::Space::with_height(Length::Fixed(60.0)),
+                back_btn
+            ]
+            .align_items(iced::Alignment::Center)
+        )
+        .padding(60)
+        .style(move |_: &Theme| container::Appearance {
+            background: Some(iced::Background::Color(IcedColor::from_rgba(0.0, 0.0, 0.0, 0.85))),
+            border: iced::Border {
+                radius: 20.0.into(),
+                width: 4.0,
+                color: glow_color, 
+            },
+            ..Default::default()
+        });
+
+        let stacked = container(overlay_card)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x()
+            .center_y();
+
+        container(
+            row![
+                container(confetti_canvas).width(Length::Fill).height(Length::Fill),
+            ]
+            .push(
+                container(stacked)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .style(iced::theme::Container::Transparent)
+            )
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_: &Theme| container::Appearance {
+            background: Some(iced::Background::Color(IcedColor::from_rgb(0.1, 0.3, 0.2))),
+            ..Default::default()
+        })
+        .into()
+    }
+
+
     fn render_game(&self) -> Element<'_, Message> {
         let game = self.game.as_ref().unwrap();
+
+        let ui_scale = (self.window_size.width / 1024.0).max(0.7); 
+        let sidebar_width = 320.0 * ui_scale; 
 
         let highlights = self.get_possible_moves();
         let board = canvas(BoardView {
             game,
             highlights: highlights.clone(),
+            animation: self.animation.clone(), 
         })
         .width(Length::Fill)
         .height(Length::Fill);
 
         let hand = self.make_hand_view(game);
-        let sidebar = self.make_sidebar(game);
+        let sidebar = self.make_sidebar(game, ui_scale);
 
         let main_area = row![
             container(board)
@@ -446,8 +768,8 @@ impl DogApp {
                 .style(iced::theme::Container::Transparent),
             
             container(sidebar)
-                .width(Length::Fixed(250.0))
-                .padding(10)
+                .width(Length::Fixed(sidebar_width))
+                .padding(20.0 * ui_scale) 
                 .style(|_: &Theme| container::Appearance {
                     background: Some(iced::Background::Color(IcedColor::from_rgba(0.0, 0.0, 0.0, 0.3))),
                     text_color: Some(IcedColor::WHITE),
@@ -457,7 +779,7 @@ impl DogApp {
         .spacing(0)
         .height(Length::Fill);
 
-        let grab_bar = self.build_grab_bar();
+        let grab_bar = self.build_grab_bar(ui_scale);
 
         container(
             column![
@@ -475,61 +797,57 @@ impl DogApp {
         .into()
     }
 
-    fn build_grab_bar(&self) -> Option<Element<'_, Message>> {
+    fn build_grab_bar(&self, scale: f32) -> Option<Element<'_, Message>> {
         if let Some(pending) = &self.pending_action {
             match pending {
                 PendingAction::Grab => {
                     if self.selected_opponent.is_none() {
-                        let mut row_buttons: Row<'_, Message> = Row::new().spacing(10);
-                        for (idx, player) in self.game.as_ref().unwrap().players.iter().enumerate()
-                        {
+                        let mut row_buttons = row![].spacing(5.0 * scale);
+                        for (idx, player) in self.game.as_ref().unwrap().players.iter().enumerate() {
                             if idx == self.game.as_ref().unwrap().current_player_index {
                                 continue;
                             }
                             row_buttons = row_buttons.push(
-                                Button::new(Text::new(format!("{:?}", player.color)).size(14))
-                                    .on_press(Message::OpponentSelected(idx)),
+                                button(text(format!("{:?}", player.color)).size(14.0*scale))
+                                    .on_press(Message::OpponentSelected(idx))
                             );
                         }
-                        Some(Container::new(row_buttons).padding(10).into())
+                        Some(container(row_buttons).padding(5.0*scale).into())
                     } else {
                         let opponent_idx = self.selected_opponent.unwrap();
-                        let opponent_cards =
-                            &self.game.as_ref().unwrap().players[opponent_idx].cards;
+                        let opponent_cards = &self.game.as_ref().unwrap().players[opponent_idx].cards;
 
-                        let mut row_buttons: Row<'_, Message> = Row::new().spacing(10);
+                        let mut row_buttons = row![].spacing(5.0*scale);
                         for (idx, _) in opponent_cards.iter().enumerate() {
                             row_buttons = row_buttons.push(
-                                Button::new(Text::new(format!("{}", idx + 1)).size(14))
-                                    .on_press(Message::OpponentCardSelected(idx)),
+                                button(text(format!("{}", idx + 1)).size(14.0*scale))
+                                    .on_press(Message::OpponentCardSelected(idx))
                             );
                         }
 
                         row_buttons = row_buttons.push(
-                            Button::new(Text::new("Zurück").size(14))
+                            button(text("Zurück").size(14.0*scale))
                                 .style(iced::theme::Button::Destructive)
-                                .on_press(Message::OpponentCardBack),
+                                .on_press(Message::OpponentCardBack)
                         );
 
-                        Some(Container::new(row_buttons).padding(10).into())
+                        Some(container(row_buttons).padding(5.0*scale).into())
                     }
                 }
-
                 PendingAction::TradeGrab => {
                     let opponent_idx = self.selected_opponent.unwrap();
                     let opponent_cards = &self.game.as_ref().unwrap().players[opponent_idx].cards;
 
-                    let mut row_buttons: Row<'_, Message> = Row::new().spacing(10);
+                    let mut row_buttons = row![].spacing(5.0*scale);
                     for (idx, _) in opponent_cards.iter().enumerate() {
                         row_buttons = row_buttons.push(
-                            Button::new(Text::new(format!("{}", idx + 1)).size(14))
-                                .on_press(Message::OpponentCardSelected(idx)),
+                            button(text(format!("{}", idx + 1)).size(14.0*scale))
+                                .on_press(Message::OpponentCardSelected(idx))
                         );
                     }
 
-                    Some(Container::new(row_buttons).padding(10).into())
+                    Some(container(row_buttons).padding(5.0*scale).into())
                 }
-
                 _ => None,
             }
         } else {
@@ -550,8 +868,8 @@ impl DogApp {
             .into()
     }
     
-    fn debug_view(&self) -> Element<'_, Message> {
-        let font_size = 12;
+    fn debug_view(&self, scale: f32) -> Element<'_, Message> {
+        let font_size = 14.0 * scale;
         let game_debug = if let Some(game) = &self.game {
             column![
                 text("GAME").size(font_size).style(IcedColor::WHITE),
@@ -562,34 +880,34 @@ impl DogApp {
                     game.current_player_index
                 )).size(font_size).style(IcedColor::from_rgb(0.8,0.8,0.8)),
             ]
-            .spacing(2)
+            .spacing(4.0 * scale)
         } else {
-            column![text("GAME: none").size(font_size)].spacing(2)
+            column![text("GAME: none").size(font_size)].spacing(4.0 * scale)
         };
 
         column![
-            text("DEBUG").size(14).style(IcedColor::WHITE),
+            text("DEBUG").size(16.0 * scale).style(IcedColor::WHITE),
             text(format!("sel_card: {:?}", self.selected_card)).size(font_size).style(IcedColor::from_rgb(0.8,0.8,0.8)),
             text(format!("pending: {:?}", self.pending_action)).size(font_size).style(IcedColor::from_rgb(0.8,0.8,0.8)),
             text("----------------").size(font_size).style(IcedColor::from_rgb(0.5,0.5,0.5)),
             game_debug,
         ]
-        .spacing(4)
+        .spacing(4.0 * scale)
         .into()
     }
 
-    fn make_sidebar(&self, game: &Game) -> Element<'_, Message> {
-        let font_std = 16;
+    fn make_sidebar(&self, game: &Game, scale: f32) -> Element<'_, Message> {
+        let font_std = 16.0 * scale;
         let info = column![
-            text(format!("Runde: {}", game.round)).size(18).style(IcedColor::WHITE),
+            text(format!("Runde: {}", game.round)).size(font_std).style(IcedColor::WHITE),
             text(format!(
                 "Am Zug: {:?} (P{})",
                 game.current_player().color,
                 game.current_player_index
-            )).size(18).style(IcedColor::WHITE),
-            text(&self.msg).size(14).style(IcedColor::from_rgb(0.9, 0.9, 0.9)),
+            )).size(font_std).style(IcedColor::WHITE),
+            text(&self.msg).size(14.0 * scale).style(IcedColor::from_rgb(0.9, 0.9, 0.9)),
         ]
-        .spacing(10);
+        .spacing(5.0 * scale);
 
         let player = game.current_player();
         let hand = &player.cards;
@@ -604,7 +922,7 @@ impl DogApp {
         let has_grab_card = hand.iter().any(|c| matches!(c, Card::Two))
             && matches!(self.selected_variant, Some(GameVariantKind::FreeForAll));
 
-        let mut btns = column![].spacing(10);
+        let mut btns = column![].spacing(8.0 * scale);
 
         if !game.trading_phase {
             if can_move {
@@ -671,19 +989,19 @@ impl DogApp {
         column![
             info,
             btns,
-            container(self.debug_view())
-                .padding(10)
-                .style(|_: &Theme| container::Appearance {
+            container(self.debug_view(scale))
+                .padding(10.0 * scale)
+                .style(move |_: &Theme| container::Appearance {
                     background: Some(iced::Background::Color(IcedColor::from_rgba(0.0, 0.0, 0.0, 0.3))),
                     text_color: Some(IcedColor::from_rgb(0.7, 0.7, 0.7)),
                     border: iced::Border {
-                        radius: 5.0.into(),
+                        radius: (5.0 * scale).into(),
                         ..Default::default()
                     },
                     ..Default::default()
                 }),
         ]
-        .spacing(30)
+        .spacing(30.0 * scale)
         .into()
     }
 
@@ -708,7 +1026,6 @@ impl DogApp {
                 self.selected_opponent_card = None;
                 self.msg = "Wähle einen Gegner zum Klauen.".into();
             }
-
             GameAction::TradeGrab => {
                 let game = self.game.as_ref().unwrap();
                 let prev_idx = if game.current_player_index == 0 {
@@ -720,12 +1037,8 @@ impl DogApp {
                 self.selected_opponent = Some(prev_idx);
                 self.selected_opponent_card = None;
 
-                self.msg = format!(
-                    "Tausch-Klau: Wähle Karte von {:?}.",
-                    game.players[prev_idx].color
-                );
+                self.msg = format!("Tausch-Klau: Wähle Karte von {:?}.", game.players[prev_idx].color);
             }
-
             GameAction::Move => {
                 self.pending_action = Some(PendingAction::Move { from: None });
                 self.msg = "Wähle Figur (Start).".into();
@@ -734,14 +1047,11 @@ impl DogApp {
                 self.pending_action = Some(PendingAction::Interchange { from: None });
                 self.msg = "Wähle erste Figur zum Tauschen.".into();
             }
-
             GameAction::Place => {
                 let act = Action {
                     player: current_color,
                     card: Some(card),
-                    action: ActionKind::Place {
-                        target_player: current_idx,
-                    },
+                    action: ActionKind::Place { target_player: current_idx },
                 };
                 self.do_action(card, act);
             }
@@ -788,34 +1098,24 @@ impl DogApp {
                         let act = Action {
                             player: current_color,
                             card: Some(card),
-                            action: ActionKind::Move {
-                                from: start_idx,
-                                to: tile_idx,
-                            },
+                            action: ActionKind::Move { from: start_idx, to: tile_idx },
                         };
                         self.do_action(card, act);
                     } else {
-                        self.pending_action = Some(PendingAction::Move {
-                            from: Some(tile_idx),
-                        });
+                        self.pending_action = Some(PendingAction::Move { from: Some(tile_idx) });
                         self.msg = format!("Start: {}. Wähle Ziel!", tile_idx);
                     }
                 }
                 PendingAction::Interchange { from } => match from {
                     None => {
-                        self.pending_action = Some(PendingAction::Interchange {
-                            from: Some(tile_idx),
-                        });
+                        self.pending_action = Some(PendingAction::Interchange { from: Some(tile_idx) });
                         self.msg = format!("Figur 1: {}. Wähle Figur 2.", tile_idx);
                     }
                     Some(first_idx) => {
                         let act = Action {
                             player: current_color,
                             card: Some(card),
-                            action: ActionKind::Interchange {
-                                a: first_idx,
-                                b: tile_idx,
-                            },
+                            action: ActionKind::Interchange { a: first_idx, b: tile_idx },
                         };
                         self.do_action(card, act);
                     }
@@ -827,15 +1127,49 @@ impl DogApp {
     }
 
     fn do_action(&mut self, card: Card, mut action: Action) {
+        let is_move = matches!(action.action, ActionKind::Move { .. } | ActionKind::Split { .. });
+        
+        let (from_idx, to_idx) = match action.action {
+            ActionKind::Move { from, to } => (from, to),
+            ActionKind::Split { from, to } => (from, to),
+            _ => (0, 0),
+        };
+
         if matches!(action.action, ActionKind::TradeGrab { .. }) {
             action.card = None;
         } else {
             action.card = Some(card);
         }
 
+        let current_color_enum = self.game.as_ref().unwrap().current_player().color;
+        let current_color_iced = match current_color_enum {
+            GameColor::Red => IcedColor::from_rgb(0.8, 0.2, 0.2),
+            GameColor::Green => IcedColor::from_rgb(0.2, 0.8, 0.2),
+            GameColor::Blue => IcedColor::from_rgb(0.2, 0.2, 0.8),
+            GameColor::Yellow => IcedColor::from_rgb(0.8, 0.8, 0.2),
+            GameColor::Purple => IcedColor::from_rgb(0.5, 0.0, 0.5),
+            GameColor::Orange => IcedColor::from_rgb(1.0, 0.65, 0.0),
+        };
+
         if let Some(game) = self.game.as_mut() {
             match game.action(action.card, action) {
-                Ok(_) => self.msg = "Zug erfolgreich!".into(),
+                Ok(_) => {
+                    self.msg = "Zug erfolgreich!".into();
+                    
+                    if is_move {
+                        self.animation = Some(MoveAnimation {
+                            from: from_idx,
+                            to: to_idx,
+                            color: current_color_iced,
+                            progress: 0.0,
+                        });
+                        self.last_tick = Instant::now();
+                    }
+
+                    if game.is_winner() {
+                        self.trigger_win(current_color_enum);
+                    }
+                },
                 Err(e) => self.msg = format!("Fehler: {}", e),
             }
 
@@ -848,11 +1182,47 @@ impl DogApp {
 }
 
 
+struct ConfettiView<'a> {
+    confetti: &'a [Confetti],
+}
+
+impl<'a> canvas::Program<Message> for ConfettiView<'a> {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: iced::Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+
+        for c in self.confetti {
+            let rect = canvas::Path::rectangle(
+                Point::new(c.x, c.y),
+                Size::new(c.size, c.size * 1.5), 
+            );
+            
+            frame.with_save(|frame| {
+                frame.translate(iced::Vector::new(c.x + c.size/2.0, c.y + c.size*0.75));
+                frame.rotate(c.rotation);
+                frame.translate(iced::Vector::new(-c.x - c.size/2.0, -c.y - c.size*0.75));
+                frame.fill(&rect, c.color);
+            });
+        }
+
+        vec![frame.into_geometry()]
+    }
+}
+
+
 struct BoardView<'a> {
     game: &'a Game,
     highlights: Vec<usize>,
+    animation: Option<MoveAnimation>, 
 }
-
 
 fn get_tile_position(index: usize, total_players: usize, center: Point, scale: f32, rotation_angle: f32) -> Point {
     let r_ring = 250.0 * scale;
@@ -911,7 +1281,7 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
 
             let min_dim = bounds.width.min(bounds.height);
             let scale = min_dim / 850.0; 
-            
+
             let current_p_idx = self.game.current_player_index;
             let current_p_angle = (current_p_idx as f32 * 16.0 / ring_size as f32) * std::f32::consts::TAU;
             let rotation = std::f32::consts::FRAC_PI_2 - current_p_angle;
@@ -954,11 +1324,9 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
         frame.fill(&shadow, IcedColor::from_rgba(0.0, 0.0, 0.0, 0.5));
 
         let bg = canvas::Path::circle(center, board_radius);
-        frame.fill(&bg, IcedColor::from_rgb(0.85, 0.70, 0.55)); // Holz
+        frame.fill(&bg, IcedColor::from_rgb(0.85, 0.70, 0.55)); 
         frame.stroke(&bg, canvas::Stroke::default().with_width(line_width).with_color(IcedColor::from_rgb(0.5, 0.3, 0.1)));
 
-    
-        
         for offset in 1..total_players {
             let opponent_idx = (current_p_idx + offset) % total_players;
             let card_count = self.game.players[opponent_idx].cards.len();
@@ -968,7 +1336,6 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
             
             let card_orbit_radius = board_radius + (ch / 2.0) + (15.0 * scale); 
 
-         
             let angle_step = std::f32::consts::TAU / (total_players as f32);
             let card_angle = std::f32::consts::FRAC_PI_2 - (offset as f32 * angle_step);
 
@@ -977,7 +1344,6 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
                 center.y + card_orbit_radius * card_angle.sin() 
             );
 
-         
             let is_horizontal = card_angle.cos().abs() < 0.5;
 
             for c in 0..card_count {
@@ -1043,8 +1409,7 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
         }
 
         let board_state = self.game.board_state();
-        let current_color_enum = self.game.current_player().color;
-        let current_color_iced = match current_color_enum {
+        let current_color_iced = match self.game.current_player().color {
             GameColor::Red => IcedColor::from_rgb(0.8, 0.2, 0.2),
             GameColor::Green => IcedColor::from_rgb(0.2, 0.8, 0.2),
             GameColor::Blue => IcedColor::from_rgb(0.2, 0.2, 0.8),
@@ -1053,7 +1418,6 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
             GameColor::Orange => IcedColor::from_rgb(1.0, 0.65, 0.0),
         };
 
-        // 4. Felder und Figuren
         for i in 0..total_tiles {
             let pos = get_tile_position(i, total_players, center, scale, rotation);
             
@@ -1079,17 +1443,26 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
                 frame.fill(&marker, IcedColor::from_rgba(start_mark_color.r, start_mark_color.g, start_mark_color.b, 0.3));
             }
 
+            let is_animating_target = self.animation.as_ref().map_or(false, |a| a.to == i && a.progress < 1.0);
+
             match board_state.get(i).and_then(|t| t.as_ref()) {
                 Some(piece) => {
-                    let color = match self.game.players[piece.owner].color {
-                        GameColor::Red => IcedColor::from_rgb(0.8, 0.2, 0.2),
-                        GameColor::Green => IcedColor::from_rgb(0.2, 0.8, 0.2),
-                        GameColor::Blue => IcedColor::from_rgb(0.2, 0.2, 0.8),
-                        GameColor::Yellow => IcedColor::from_rgb(0.8, 0.8, 0.2),
-                        GameColor::Purple => IcedColor::from_rgb(0.5, 0.0, 0.5),
-                        GameColor::Orange => IcedColor::from_rgb(1.0, 0.65, 0.0),
-                    };
-                    draw_marble(&mut frame, pos, color, scale);
+                    if !is_animating_target {
+                        let color = match self.game.players[piece.owner].color {
+                            GameColor::Red => IcedColor::from_rgb(0.8, 0.2, 0.2),
+                            GameColor::Green => IcedColor::from_rgb(0.2, 0.8, 0.2),
+                            GameColor::Blue => IcedColor::from_rgb(0.2, 0.2, 0.8),
+                            GameColor::Yellow => IcedColor::from_rgb(0.8, 0.8, 0.2),
+                            GameColor::Purple => IcedColor::from_rgb(0.5, 0.0, 0.5),
+                            GameColor::Orange => IcedColor::from_rgb(1.0, 0.65, 0.0),
+                        };
+                        draw_marble(&mut frame, pos, color, scale);
+                    } else {
+                        let shadow = canvas::Path::circle(Point::new(pos.x + 1.0*scale, pos.y + 1.0*scale), 7.0 * scale);
+                        frame.fill(&shadow, IcedColor::from_rgba(0.0,0.0,0.0,0.2));
+                        let hole = canvas::Path::circle(pos, 7.0 * scale);
+                        frame.fill(&hole, IcedColor::from_rgb(0.4, 0.3, 0.2));
+                    }
                 },
                 None => {
                     let shadow = canvas::Path::circle(Point::new(pos.x + 1.0*scale, pos.y + 1.0*scale), 7.0 * scale);
@@ -1148,10 +1521,32 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
             }
         }
 
+        if let Some(anim) = &self.animation {
+            let p1 = get_tile_position(anim.from, total_players, center, scale, rotation);
+            let p2 = get_tile_position(anim.to, total_players, center, scale, rotation);
+            
+            let mut x = p1.x + (p2.x - p1.x) * anim.progress;
+            let mut y = p1.y + (p2.y - p1.y) * anim.progress;
+
+            let hop_height = 80.0 * scale;
+            let hop = (1.0 - (2.0 * anim.progress - 1.0).powi(2)) * hop_height;
+            y -= hop; 
+
+            let anim_pos = Point::new(x, y);
+            
+            let shadow_y = p1.y + (p2.y - p1.y) * anim.progress; 
+            let shadow_pos = Point::new(x, shadow_y + 5.0 * scale);
+            
+            let shadow_alpha = 0.3 * (1.0 - (hop / hop_height) * 0.7); 
+            let shadow = canvas::Path::circle(shadow_pos, 10.0 * scale);
+            frame.fill(&shadow, IcedColor::from_rgba(0.0, 0.0, 0.0, shadow_alpha));
+
+            draw_marble(&mut frame, anim_pos, anim.color, scale);
+        }
+
         vec![frame.into_geometry()]
     }
 }
-
 
 struct HandView<'a> {
     game: &'a Game,
@@ -1171,7 +1566,7 @@ impl<'a> HandView<'a> {
         let gap = 15.0 * scale;
         
         let total_w = (count as f32 * card_w) + ((count as f32 - 1.0) * gap);
-        let start_x = (bounds.width / 2.0) - (total_w / 2.0); // Zentriert
+        let start_x = (bounds.width / 2.0) - (total_w / 2.0); 
         let base_y = (bounds.height / 2.0) - (card_h / 2.0) + (10.0 * scale);
 
         cards.iter().enumerate().map(|(i, &card)| {
@@ -1292,7 +1687,6 @@ impl<'a> canvas::Program<Message> for HandView<'a> {
     }
 }
 
-// --- Drawing Stuff ---
 
 fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, color: IcedColor) {
     let center = rect.center();
