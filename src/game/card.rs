@@ -56,6 +56,10 @@ impl Card {
         matches!(self, Card::Four | Card::Joker)
     }
 
+    pub fn is_move_card(&self) -> bool {
+        self.is_forward_move_card()
+    }
+
     pub fn allows_backward_move(&self) -> bool {
         matches!(self, Card::Four | Card::Joker)
     }
