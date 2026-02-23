@@ -75,6 +75,7 @@ struct MoveAnimation {
     to: usize,
     color: IcedColor,
     progress: f32, 
+    from_zwinger_of_player: Option<usize>, // NEU: Damit die Animation weiß, ob sie aus dem Zwinger startet
 }
 
 #[derive(Debug, Clone)]
@@ -354,7 +355,7 @@ impl DogApp {
         self.animation = None;
         self.last_tick = Instant::now();
 
-        self.play_audio("win.mp3", 0.05, false);
+        self.play_audio("win.mp3", 0.5, false);
 
         self.confetti.clear();
         for _ in 0..150 {
@@ -586,7 +587,7 @@ impl DogApp {
             .style(IcedColor::from_rgb(0.9, 0.75, 0.2))
             .horizontal_alignment(iced::alignment::Horizontal::Center)
             .width(Length::Fill); 
-        //Regelwerk wurde mit KI geschrieben 
+
         let rules_text_content = 
             "Ziel des Spiels:\n\
             Bringe alle eigenen Murmeln (und die deines Teampartners) vom Zwinger sicher in den Zielbereich (Haus).\n\n\
@@ -909,58 +910,85 @@ impl DogApp {
         ]
         .spacing(5.0 * scale);
 
-        let player = game.current_player();
-        let hand = &player.cards;
-        let piece_on_board = (player.pieces_to_place + player.pieces_in_house) < 4;
-        let can_move =
-            piece_on_board && hand.iter().any(|c| !matches!(c, Card::Jack | Card::Seven));
-        let can_interchange =
-            piece_on_board && hand.iter().any(|c| matches!(c, Card::Jack | Card::Joker));
-        let has_place_card = hand
-            .iter()
-            .any(|c| matches!(c, Card::Ace | Card::King | Card::Joker));
-        let has_grab_card = hand.iter().any(|c| matches!(c, Card::Two))
-            && matches!(self.selected_variant, Some(GameVariantKind::FreeForAll));
-
         let mut btns = column![].spacing(8.0 * scale);
 
         if !game.trading_phase {
-            if can_move {
+            if let Some(rest) = game.split_rest {
                 btns = btns.push(
-                    button(text("Ziehen (Move)").size(font_std))
+                    text(format!("Split: {} Schritte übrig!", rest))
+                        .size(18.0 * scale)
+                        .style(IcedColor::from_rgb(1.0, 0.8, 0.2))
+                );
+                btns = btns.push(
+                    button(text("Weiter aufteilen (Move)").size(font_std))
                         .on_press(Message::GameActionBtn(GameAction::Move))
                         .width(Length::Fill),
                 );
-            }
+            } else {
+                let can_do_anything = game.check_if_any_action_possible();
 
-            if has_place_card {
-                btns = btns.push(
-                    button(text("Legen (Place)").size(font_std))
-                        .on_press(Message::GameActionBtn(GameAction::Place))
-                        .width(Length::Fill),
-                );
-            }
+                if !can_do_anything {
+                    btns = btns.push(
+                        text("Kein gültiger Zug möglich!")
+                            .size(16.0 * scale)
+                            .style(IcedColor::from_rgb(1.0, 0.5, 0.5))
+                    );
+                    btns = btns.push(
+                        button(text("Abwerfen (Remove)").size(font_std))
+                            .on_press(Message::GameActionBtn(GameAction::Remove))
+                            .width(Length::Fill),
+                    );
+                } else {
+                    if let Some(card) = self.selected_card {
+                        
+                        let is_place_card = matches!(card, Card::Ace | Card::King | Card::Joker);
+                        let is_move_card = !card.possible_distances().is_empty() || matches!(card, Card::Seven | Card::Joker);                        
+                        let is_jack = matches!(card, Card::Jack); 
+                        
+                        let is_interchange_card = matches!(card, Card::Jack | Card::Joker);
+                        let is_grab_card = matches!(card, Card::Two);
+                        let is_ffa = matches!(self.selected_variant, Some(GameVariantKind::FreeForAll));
 
-            if can_interchange {
-                btns = btns.push(
-                    button(text("Tauschen (Interchange)").size(font_std))
-                        .on_press(Message::GameActionBtn(GameAction::Interchange))
-                        .width(Length::Fill),
-                );
-            }
+                        if is_move_card && !is_jack {
+                            btns = btns.push(
+                                button(text("Ziehen / Split (Move)").size(font_std))
+                                    .on_press(Message::GameActionBtn(GameAction::Move))
+                                    .width(Length::Fill),
+                            );
+                        }
 
-            btns = btns.push(
-                button(text("Abwerfen (Remove)").size(font_std))
-                    .on_press(Message::GameActionBtn(GameAction::Remove))
-                    .width(Length::Fill),
-            );
+                        if is_place_card {
+                            btns = btns.push(
+                                button(text("Legen (Place)").size(font_std))
+                                    .on_press(Message::GameActionBtn(GameAction::Place))
+                                    .width(Length::Fill),
+                            );
+                        }
 
-            if has_grab_card {
-                btns = btns.push(
-                    button(text("Klauen (Grab)").size(font_std))
-                        .on_press(Message::GameActionBtn(GameAction::Grab))
-                        .width(Length::Fill),
-                );
+                        if is_interchange_card {
+                            btns = btns.push(
+                                button(text("Tauschen (Interchange)").size(font_std))
+                                    .on_press(Message::GameActionBtn(GameAction::Interchange))
+                                    .width(Length::Fill),
+                            );
+                        }
+
+                        if is_grab_card && is_ffa {
+                            btns = btns.push(
+                                button(text("Klauen (Grab)").size(font_std))
+                                    .on_press(Message::GameActionBtn(GameAction::Grab))
+                                    .width(Length::Fill),
+                            );
+                        }
+
+                    } else {
+                        btns = btns.push(
+                            text("Wähle eine Karte aus, um mögliche Aktionen zu sehen.")
+                                .size(14.0 * scale)
+                                .style(IcedColor::from_rgb(0.7, 0.7, 0.7))
+                        );
+                    }
+                }
             }
         } else {
             if matches!(self.selected_variant, Some(GameVariantKind::FreeForAll)) {
@@ -1095,10 +1123,16 @@ impl DogApp {
                 }
                 PendingAction::Move { from } => {
                     if let Some(start_idx) = from {
+                        let action_kind = if matches!(card, Card::Seven) {
+                            ActionKind::Split { from: start_idx, to: tile_idx }
+                        } else {
+                            ActionKind::Move { from: start_idx, to: tile_idx }
+                        };
+
                         let act = Action {
                             player: current_color,
                             card: Some(card),
-                            action: ActionKind::Move { from: start_idx, to: tile_idx },
+                            action: action_kind,
                         };
                         self.do_action(card, act);
                     } else {
@@ -1127,12 +1161,28 @@ impl DogApp {
     }
 
     fn do_action(&mut self, card: Card, mut action: Action) {
-        let is_move = matches!(action.action, ActionKind::Move { .. } | ActionKind::Split { .. });
-        
-        let (from_idx, to_idx) = match action.action {
-            ActionKind::Move { from, to } => (from, to),
-            ActionKind::Split { from, to } => (from, to),
-            _ => (0, 0),
+        let mut is_move = false;
+        let mut from_idx = 0;
+        let mut to_idx = 0;
+        let mut from_zwinger = None;
+
+        match action.action {
+            ActionKind::Move { from, to } => {
+                is_move = true;
+                from_idx = from;
+                to_idx = to;
+            },
+            ActionKind::Split { from, to } => {
+                is_move = true;
+                from_idx = from;
+                to_idx = to;
+            },
+            ActionKind::Place { target_player } => {
+                is_move = true;
+                to_idx = self.game.as_ref().unwrap().board.start_field(target_player);
+                from_zwinger = Some(target_player);
+            },
+            _ => {}
         };
 
         if matches!(action.action, ActionKind::TradeGrab { .. }) {
@@ -1142,7 +1192,20 @@ impl DogApp {
         }
 
         let current_color_enum = self.game.as_ref().unwrap().current_player().color;
-        let current_color_iced = match current_color_enum {
+
+        let anim_color_enum = match action.action {
+            ActionKind::Place { target_player } => self.game.as_ref().unwrap().players[target_player].color,
+            ActionKind::Move { from, .. } | ActionKind::Split { from, .. } => {
+                if let Some(piece) = &self.game.as_ref().unwrap().board.tiles[from] {
+                    self.game.as_ref().unwrap().players[piece.owner].color
+                } else {
+                    current_color_enum
+                }
+            },
+            _ => current_color_enum,
+        };
+
+        let anim_color_iced = match anim_color_enum {
             GameColor::Red => IcedColor::from_rgb(0.8, 0.2, 0.2),
             GameColor::Green => IcedColor::from_rgb(0.2, 0.8, 0.2),
             GameColor::Blue => IcedColor::from_rgb(0.2, 0.2, 0.8),
@@ -1160,8 +1223,9 @@ impl DogApp {
                         self.animation = Some(MoveAnimation {
                             from: from_idx,
                             to: to_idx,
-                            color: current_color_iced,
+                            color: anim_color_iced,
                             progress: 0.0,
+                            from_zwinger_of_player: from_zwinger,
                         });
                         self.last_tick = Instant::now();
                     }
@@ -1522,7 +1586,26 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
         }
 
         if let Some(anim) = &self.animation {
-            let p1 = get_tile_position(anim.from, total_players, center, scale, rotation);
+            let p1 = if let Some(p_idx) = anim.from_zwinger_of_player {
+                let start_idx = self.game.board.start_field(p_idx);
+                let angle_step = std::f32::consts::TAU / (ring_size as f32);
+                let start_angle = (start_idx as f32) * angle_step + rotation;
+                
+                let count = self.game.players[p_idx].pieces_to_place; 
+                let wait_radius = 295.0 * scale;
+                let marble_spacing = 0.08; 
+                let center_offset = 0.12; 
+                
+                let offset_angle = start_angle + center_offset - (count as f32 * marble_spacing);
+                
+                Point::new(
+                    center.x + wait_radius * offset_angle.cos(),
+                    center.y + wait_radius * offset_angle.sin(),
+                )
+            } else {
+                get_tile_position(anim.from, total_players, center, scale, rotation)
+            };
+            
             let p2 = get_tile_position(anim.to, total_players, center, scale, rotation);
             
             let mut x = p1.x + (p2.x - p1.x) * anim.progress;
@@ -1686,7 +1769,6 @@ impl<'a> canvas::Program<Message> for HandView<'a> {
         vec![frame.into_geometry()]
     }
 }
-
 
 fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, color: IcedColor) {
     let center = rect.center();
