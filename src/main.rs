@@ -15,41 +15,12 @@ fn select_game_variant() -> GameVariant {
         print!("Eingabe: ");
         io::stdout().flush().unwrap();
 
-        let mut input = String::new();
-        if io::stdin().read_line(&mut input).is_err() {
-            println!("Eingabefehler.");
-            continue;
-        }
+// Wir binden das GUI-Modul ein (das wir gleich erstellen)
+pub mod gui;
 
-        match input.trim() {
-            "1" => return GameVariant::TwoVsTwo,
-            "2" => return GameVariant::ThreeVsThree,
-            "3" => return GameVariant::TwoVsTwoVsTwo,
-            "4" => {
-                loop {
-                    println!("Spieleranzahl auswählen (2-6):");
-                    print!("Eingabe: ");
-                    io::stdout().flush().unwrap();
-
-                    let mut input = String::new();
-                    if io::stdin().read_line(&mut input).is_err() {
-                        println!("Eingabefehler.");
-                        continue;
-                    }
-
-                    match input.trim() {
-                        "2" => return GameVariant::FreeForAll(2),
-                        "3" => return GameVariant::FreeForAll(3),
-                        "4" => return GameVariant::FreeForAll(4),
-                        "5" => return GameVariant::FreeForAll(5),
-                        "6" => return GameVariant::FreeForAll(6),
-                        _ => println!("Ungültige Anzahl.\n"),
-                    }
-                }
-            }
-            _ => println!("Ungültige Auswahl.\n"),
-        }
-    }
+fn main() -> iced::Result {
+    // Startet die GUI aus der Datei gui.rs
+    gui::launch()
 }
 
 fn main() {

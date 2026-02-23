@@ -1,6 +1,7 @@
+// src/lib.rs
 pub mod game;
 pub mod ui;
-//pub mod net;
+pub mod ai;
 
 //pub mod bin;
 pub use game::game::{Game, DogGame};
@@ -34,3 +35,7 @@ pub enum BeginGameMesage {
 
     SpielBeitreten {player_name: String},
 }
+pub use game::card::Card;          
+pub use game::game::GameVariant;
+
+pub use ui::render;
