@@ -10,7 +10,6 @@ use rodio::{Decoder, OutputStream, Sink, Source};
 
 use braendi_dog::{Action, ActionKind, Card, Color as GameColor, DogGame, Game, GameVariant};
 
-
 pub fn launch() -> iced::Result {
     DogApp::run(Settings::default())
 }
@@ -103,7 +102,8 @@ struct DogApp {
     selected_card: Option<Card>,
     pending_action: Option<PendingAction>,
     msg: String,
-
+    join_ip_input: String,
+    player_name_input: String,
     selected_opponent: Option<usize>,
     selected_opponent_card: Option<usize>,
 
@@ -131,6 +131,11 @@ enum Message {
     BoardClicked(usize),
     GameActionBtn(GameAction),
     CancelPendingAction,
+
+    JoinIpChanged(String),
+    PlayerNameChanged(String),
+    HostGame,
+    JoinGame,
 
     OpponentSelected(usize),
     OpponentCardSelected(usize),
@@ -162,7 +167,8 @@ impl Application for DogApp {
             last_tick: Instant::now(),
             
             confetti: Vec::new(),
-
+            join_ip_input: String::from("127.0.0.1:8080"),
+            player_name_input: String::new(),
             _audio_stream: None,
             audio_sink: None,
         };
@@ -313,6 +319,21 @@ impl Application for DogApp {
 
             Message::BoardClicked(tile_index) => {
                 self.handle_board_click(tile_index);
+            }
+
+            Message::JoinIpChanged(ip) => {
+                self.join_ip_input = ip;
+            }
+            Message::PlayerNameChanged(name) => {
+                self.player_name_input = name;
+            }
+            Message::HostGame => {
+                // Später kommt hier die Server-Start Logik hin
+                println!("Hoste Spiel..."); 
+            }
+            Message::JoinGame => {
+                // Später kommt hier die Client-Connect Logik hin
+                println!("Verbinde zu {} als {}...", self.join_ip_input, self.player_name_input);
             }
         }
         Command::none()
@@ -488,7 +509,8 @@ impl DogApp {
         }
     }
 
-    fn render_start(&self) -> Element<'_, Message> {
+   
+   fn render_start(&self) -> Element<'_, Message> {
         let title = text("Brändi Dog")
             .size(80)
             .style(IcedColor::from_rgb(0.9, 0.75, 0.2)) 
@@ -499,7 +521,7 @@ impl DogApp {
             .style(IcedColor::from_rgb(0.7, 0.7, 0.7)) 
             .horizontal_alignment(iced::alignment::Horizontal::Center);
 
-        let instruction = text("Bitte Spielmodus wählen:")
+        let host_instruction = text("Neues Spiel erstellen:")
             .size(18)
             .style(IcedColor::WHITE)
             .horizontal_alignment(iced::alignment::Horizontal::Center);
@@ -513,7 +535,7 @@ impl DogApp {
         .width(Length::Fixed(300.0))
         .padding(15); 
 
-        let mut controls = column![instruction, dropdown]
+        let mut host_controls = column![host_instruction, dropdown]
             .spacing(10)
             .align_items(iced::Alignment::Center);
 
@@ -522,44 +544,81 @@ impl DogApp {
                 .on_input(Message::FreeForAllPlayersChanged)
                 .padding(15)
                 .width(Length::Fixed(300.0));
-            controls = controls.push(iced::widget::Space::with_height(Length::Fixed(10.0)));
-            controls = controls.push(ffa_input);
+            host_controls = host_controls.push(iced::widget::Space::with_height(Length::Fixed(5.0)));
+            host_controls = host_controls.push(ffa_input);
         }
 
         let can_start = self.build_game_variant().is_some();
 
-        let start_btn = button(
-            text("Spiel Starten")
-                .size(24)
-                .horizontal_alignment(iced::alignment::Horizontal::Center)
+        let start_local_btn = button(
+            text("Lokal Starten").size(18).horizontal_alignment(iced::alignment::Horizontal::Center)
         )
-        .padding([15, 50])
+        .padding([12, 30])
         .on_press_maybe(can_start.then_some(Message::StartGame));
 
-        let rules_btn = button(
-            text("Spielregeln")
-                .size(20)
-                .horizontal_alignment(iced::alignment::Horizontal::Center)
+        let host_btn = button(
+            text("Spiel Hosten").size(18).horizontal_alignment(iced::alignment::Horizontal::Center)
         )
-        .padding([10, 40])
+        .padding([12, 30])
+        .style(iced::theme::Button::Positive) 
+        .on_press_maybe(can_start.then_some(Message::HostGame));
+
+        host_controls = host_controls.push(iced::widget::Space::with_height(Length::Fixed(10.0)));
+        host_controls = host_controls.push(row![start_local_btn, host_btn].spacing(15));
+
+        let join_instruction = text("Oder bestehendem Spiel beitreten:")
+            .size(18)
+            .style(IcedColor::WHITE)
+            .horizontal_alignment(iced::alignment::Horizontal::Center);
+
+        let name_input = text_input("Dein Spielername...", &self.player_name_input)
+            .on_input(Message::PlayerNameChanged)
+            .padding(15)
+            .width(Length::Fixed(300.0));
+
+        let ip_input = text_input("IP-Adresse (z.B. 127.0.0.1:8080)", &self.join_ip_input)
+            .on_input(Message::JoinIpChanged)
+            .padding(15)
+            .width(Length::Fixed(300.0));
+
+        let join_btn = button(
+            text("Spiel Beitreten").size(20).horizontal_alignment(iced::alignment::Horizontal::Center)
+        )
+        .padding([15, 60])
+        .style(iced::theme::Button::Primary) 
+        .on_press(Message::JoinGame);
+
+        let join_controls = column![
+            join_instruction,
+            name_input,
+            ip_input,
+            iced::widget::Space::with_height(Length::Fixed(5.0)),
+            join_btn
+        ]
+        .spacing(10)
+        .align_items(iced::Alignment::Center);
+
+        let rules_btn = button(
+            text("Spielregeln").size(16).horizontal_alignment(iced::alignment::Horizontal::Center)
+        )
+        .padding([10, 30])
         .style(iced::theme::Button::Secondary)
         .on_press(Message::ShowRules);
-
-        controls = controls.push(iced::widget::Space::with_height(Length::Fixed(30.0)));
-        controls = controls.push(start_btn);
-        controls = controls.push(iced::widget::Space::with_height(Length::Fixed(10.0)));
-        controls = controls.push(rules_btn);
 
         let menu_card = container(
             column![
                 title,
                 subtitle,
-                iced::widget::Space::with_height(Length::Fixed(50.0)),
-                controls,
+                iced::widget::Space::with_height(Length::Fixed(40.0)),
+                host_controls,
+                iced::widget::Space::with_height(Length::Fixed(30.0)),
+                join_controls,
+                iced::widget::Space::with_height(Length::Fixed(30.0)),
+                rules_btn,
             ]
             .align_items(iced::Alignment::Center) 
         )
-        .padding(60)
+        .padding(50)
         .style(|_: &Theme| container::Appearance {
             background: Some(iced::Background::Color(IcedColor::from_rgba(0.0, 0.0, 0.0, 0.6))),
             border: iced::Border {
