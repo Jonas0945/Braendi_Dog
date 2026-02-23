@@ -307,12 +307,10 @@ impl Game {
     }
 
     pub fn can_control_piece(&self, actor_index: usize, piece_owner_index: usize) -> bool {
-        // Own piece
         if actor_index == piece_owner_index {
             return true;
         }
 
-        // Team piece
         if self.players[actor_index].pieces_in_house == 4 {
             if let Some(teams) = &self.teams {
                 return teams
@@ -329,23 +327,20 @@ impl Game {
             return true;
         }
 
-        // FFA catch
         let Some(teams) = &self.teams else {
             return false;
         };
 
-        // Check if placer has 4 pieces in house
         if self.players[placer].pieces_in_house != 4 {
             return false;
         }
 
-        // Both players must be in the same team
         teams
             .iter()
             .any(|team| team.contains(&placer) && team.contains(&target))
     }
 
-    fn check_if_any_action_possible(&self) -> bool {
+    pub fn check_if_any_action_possible(&self) -> bool {
         let current_player = self.player_by_index(self.current_player_index);
 
         for card in &current_player.cards {
@@ -381,17 +376,18 @@ impl Game {
             }
         }
 
-        let team_pieces = self.find_team_pieces(current_player_index);
+        // FIX: Wir holen uns direkt die Figuren, die wir WIRKLICH kontrollieren dürfen!
+        let movable_pieces = self.find_movable_pieces(current_player_index);
 
-        if team_pieces.is_empty() {
+        if movable_pieces.is_empty() {
             return false;
         }
 
-        // Check if split is possible
+        // Check if split is possible (FIX: Nutzt jetzt movable_pieces)
         if matches!(card, Card::Seven | Card::Joker) {
             let mut total_steps: u8 = 0;
 
-            for &from in &team_pieces {
+            for &from in &movable_pieces {
                 let steps = self.board.max_path_from(from, &controllable_player_indices);
                 total_steps = total_steps.saturating_add(steps);
 
@@ -400,8 +396,6 @@ impl Game {
                 }
             }
         }
-
-        let movable_pieces = self.find_movable_pieces(current_player_index);
 
         // Check if interchange is possible
         if matches!(card, Card::Jack | Card::Joker) {
@@ -603,7 +597,6 @@ impl Game {
             return Err("Cannot move this piece");
         }
 
-        // Calculate distances and check if card allows the move
         let forward_distance = self.board.distance_between(from, to, moving_piece.owner);
         let backward_distance = self.board.distance_between(to, from, moving_piece.owner);
 
@@ -611,7 +604,6 @@ impl Game {
             return Err("Move not allowed with this card");
         }
 
-        // Calculate path + direction
         let is_backward = 
             matches!(_action.card, Some(Card::Four | Card::Joker)) 
             && backward_distance == Some(4);
@@ -620,7 +612,6 @@ impl Game {
             .passed_tiles(from, to, moving_piece.owner, is_backward)
             .ok_or("Invalid move: path cannot be calculated")?;
 
-        // Check for blocking pieces
         for &tile in &path {
             if let Some(piece) = self.board.tiles[tile] {
                 if tile >= self.board.ring_size {
@@ -631,10 +622,8 @@ impl Game {
             }
         }
 
-        // Move execution
         self.board.tiles[from] = None;
 
-        // Remove piece from destination tile if opponent piece is there
         let mut beaten_piece_owner = None;
 
         if let Some(beaten_piece) = self.board.tiles[to].take() {
@@ -642,13 +631,11 @@ impl Game {
             self.players[beaten_piece.owner].pieces_to_place += 1;
         }
 
-        // Piece placement and history update
         self.board.tiles[to] = Some(Piece {
             owner: moving_piece.owner, 
             left_start: true 
             });
 
-        // Piece moves into house
         if from < self.board.ring_size && to >= self.board.ring_size { 
             self.players[moving_piece.owner].pieces_in_house += 1;
         }
@@ -707,7 +694,6 @@ impl Game {
             .ok_or("Cannot interchange to an empty tile")?
             .clone();
 
-        // Interchange only allowed on "ring-pieces"
         if a >= self.board.ring_size || b >= self.board.ring_size {
             return Err("Cannot interchange pieces inside player's houses");
         }
@@ -720,7 +706,6 @@ impl Game {
             return Err("Cannot interchange with protected piece");
         }
 
-        // Interchange pieces
         self.board.tiles[a] = Some(b_piece);
         self.board.tiles[b] = Some(a_piece);
 
@@ -788,7 +773,6 @@ impl Game {
 
         self.trade_buffer.push((player_index, teammate_index, removed_card));
 
-        // Trade cards when every player has chosen a card
         if self.trade_buffer.len() == self.players.len() {
             let trades: Vec<_> = self.trade_buffer
                 .drain(..)
@@ -801,7 +785,6 @@ impl Game {
             self.trading_phase = false;
         }
 
-        // History update
         self.history.push(HistoryEntry {
             action: _action,
             played_card_index,
@@ -917,14 +900,8 @@ impl Game {
         let moving_piece = self.board.check_tile(from)
             .ok_or("Invalid move: no piece found.")?;
 
-        let team_indices = match self.game_variant {
-            GameVariant::FreeForAll(n) => (0..n).collect(), // FFA: 7 can split-move every piece
-            _ => self.teammate_indices(current_player_index),
-        };
-
-        // Ony team pieces can be moved
-        if moving_piece.owner != current_player_index && !team_indices.contains(&moving_piece.owner) {
-            return Err("Cannot split-move a piece you do not control (own or teammate).");
+        if !self.can_control_piece(current_player_index, moving_piece.owner) {
+            return Err("Cannot split-move a piece you do not control yet (get your pieces home first!).");
         }
 
         let mut remaining_steps = self.split_rest.unwrap_or(7);
@@ -1183,31 +1160,22 @@ impl Game {
 }
 
 pub trait DogGame {
-    // Creates new instance with an empty board and initialized deck and players based on chosen variant
     fn new(variant: GameVariant) -> Self;
 
-    // Returns the current state of the board
     fn board_state(&self) -> &[Option<Piece>];
 
-    // Returns the current player
     fn current_player(&self) -> &Player;
 
-    // Matches and applies the action of playing the given card for the current player
     fn action(&mut self, card: Option<Card>, action: Action) -> Result<(), &'static str>;
 
-    // Undoes the last action
     fn undo_action(&mut self) -> Result<(), &'static str>;
 
-    // // Undoes the last complete turn, including all actions that belong to it
     fn undo_turn(&mut self) -> Result<(), &'static str>;
 
-    // Undoes multiple turns in sequence
     fn undo_sequence(&mut self, turns: usize) -> Result<(), &'static str>;
 
-    // Gives players new cards after previous round is finished
     fn new_round(&mut self);
 
-    // Checks if there is yet a winning team / player
     fn is_winner(&self) -> bool;
 }
 
@@ -1230,17 +1198,14 @@ impl DogGame for Game {
             return Err("It's not his player's turn.");
         }
 
-        // Split check
         if self.split_rest.is_some() && !matches!(_action.action, ActionKind::Split { .. }) {
                 return Err("Cannot perform actions other than Split during splitting phase.");
         }
 
-        // Trading phase check
         if self.trading_phase && !matches!(_action.action, ActionKind::Trade | ActionKind::TradeGrab { .. }) {
             return Err("Cannot perform actions other than Trade during swapping phase.");
         }
 
-        // Card check
         match _action.action {
             ActionKind::TradeGrab { .. } => {
                 if card.is_some() {
