@@ -4,6 +4,8 @@ use std::io::{self, Write};
 use std::fs::OpenOptions;
 use std::str::FromStr;
 
+// Wir binden das GUI-Modul ein (das wir gleich erstellen)
+pub mod gui;
 
 fn select_game_variant() -> GameVariant {
     loop {
@@ -15,15 +17,44 @@ fn select_game_variant() -> GameVariant {
         print!("Eingabe: ");
         io::stdout().flush().unwrap();
 
-// Wir binden das GUI-Modul ein (das wir gleich erstellen)
-pub mod gui;
+        // hier könnte man die Auswahl verarbeiten
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_err() {
+            println!("Fehler beim Lesen der Eingabe.");
+            continue;
+        }
+        match input.trim() {
+            "1" => return GameVariant::TwoVsTwo,
+            "2" => return GameVariant::ThreeVsThree,
+            "3" => return GameVariant::TwoVsTwoVsTwo,
+            "4" => {
+                // ask how many players
+                print!("Anzahl Spieler (2-6): ");
+                io::stdout().flush().unwrap();
+                let mut cnt = String::new();
+                if io::stdin().read_line(&mut cnt).is_err() {
+                    println!("Fehler beim Lesen der Eingabe.");
+                    continue;
+                }
+                if let Ok(n) = cnt.trim().parse::<usize>() {
+                    return GameVariant::FreeForAll(n);
+                } else {
+                    println!("Ungültige Zahl, bitte erneut versuchen.");
+                }
+            }
+            _ => println!("Ungültige Auswahl, bitte erneut versuchen."),
+        }
+    }
+}
 
 fn main() -> iced::Result {
     // Startet die GUI aus der Datei gui.rs
     gui::launch()
 }
 
-fn main() {
+// CLI variant (not used by default)
+#[allow(dead_code)]
+fn cli_main() {
     let variant = select_game_variant();
     let mut game = Game::new(variant);
     let log_file_path = "game_log.txt";
@@ -34,7 +65,6 @@ fn main() {
         render(&game);
 
         // Read player action
-
         print!("Aktion eingeben (z.B. Place, Move, Split, Trade, Remove, Undo, exit): ");
         io::stdout().flush().unwrap();
 
@@ -93,7 +123,7 @@ fn main() {
 }
 
 /*
-# [tokio::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>>{
 
     tokio::spawn(async {
@@ -101,4 +131,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
 );
     net::client::starte_client("127.0.0.1:8080").await?;
     Ok(())
-}*/
+}
+*/

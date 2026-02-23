@@ -10,8 +10,10 @@ pub use game::piece::Piece;
 pub use game::action::{Action, ActionKind};
 use serde::{Deserialize, Serialize};
 pub use ui::render;
+pub use game::card::Card;          
+pub use game::game::GameVariant;
 
-use crate::game::GameVariant;
+
 
 //Aktionen, die SPieler versuchen können
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -35,7 +37,4 @@ pub enum BeginGameMesage {
 
     SpielBeitreten {player_name: String},
 }
-pub use game::card::Card;          
-pub use game::game::GameVariant;
 
-pub use ui::render;

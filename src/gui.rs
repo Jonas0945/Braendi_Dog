@@ -10,6 +10,7 @@ use rodio::{Decoder, OutputStream, Sink, Source};
 
 use braendi_dog::{Action, ActionKind, Card, Color as GameColor, DogGame, Game, GameVariant};
 
+
 pub fn launch() -> iced::Result {
     DogApp::run(Settings::default())
 }
