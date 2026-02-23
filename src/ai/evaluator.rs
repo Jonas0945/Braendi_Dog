@@ -376,7 +376,7 @@ pub struct Evaluator {
 }
 
 impl Evaluator {
-    pub fn new_default() -> Self {
+    pub fn new() -> Self {
         Self {
             features: vec![
                 EvalFeature::HouseProgress,

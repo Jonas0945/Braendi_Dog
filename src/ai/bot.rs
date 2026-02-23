@@ -2,10 +2,16 @@ use rand::seq::SliceRandom;
 use rand::rngs::ThreadRng;
 use rand::rng;
 
-
+use crate::game::game::{Game, DogGame};
 use crate::Action;
+use crate::ActionKind::Split;
+use crate::ai::evaluator::{Evaluator, EvalContext, EvalPerspective, Score};
 
+pub trait Bot {
+    fn new() -> Self;
 
+    fn choose_action(&mut self, game: &mut Game, actions: Vec<Action>) -> Option<Action>;
+}
 
 pub struct RandomBot {
     rng: ThreadRng,
@@ -13,24 +19,19 @@ pub struct RandomBot {
 
 impl RandomBot {
     pub fn new() -> Self {
-        RandomBot { 
+        Self { 
             rng: rng(),
         }
     }
 }
 
-pub trait Bot {
-    fn new() -> Self;
-
-    fn choose_action(&mut self, actions: Vec<Action>) -> Option<Action>;
-}
 
 impl Bot for RandomBot {
     fn new() -> Self {
         RandomBot::new()
     }
 
-    fn choose_action(&mut self, mut actions: Vec<Action>) -> Option<Action> {
+    fn choose_action(&mut self, _game: &mut Game, mut actions: Vec<Action>) -> Option<Action> {
 
         if actions.is_empty() {
             return None;
@@ -38,6 +39,76 @@ impl Bot for RandomBot {
 
         actions.shuffle(&mut self.rng);
         actions.into_iter().next()
+    }
+}
+
+pub struct EvalBot {
+    evaluator: Evaluator,
+}
+
+impl EvalBot {
+    pub fn new() -> Self {
+        Self { evaluator: Evaluator::new() }
+    }
+}
+
+impl Bot for EvalBot {
+    fn new() -> Self {
+        EvalBot::new()
+    }
+
+    fn choose_action(&mut self, game: &mut Game, actions: Vec<Action>) -> Option<Action> {
+        if actions.is_empty() {
+            return None;
+        }
+
+        let player_index = game.current_player_index;
+
+        let teammate_indices = game.teammate_indices(player_index);
+
+        let opponent_indices: Vec<usize> = (0..game.players.len())
+            .filter(|i| {
+                *i != player_index &&
+                !teammate_indices.contains(i)
+            })
+            .collect();
+
+        let mut best_score = Score::MIN;
+        let mut best_action: Option<Action> = None;
+
+        for action in actions {
+
+            // Aktion simulieren
+            if game.action(action.card, action.clone()).is_err() {
+                continue;
+            }
+
+            let ctx = EvalContext {
+                game,
+                perspective: EvalPerspective {
+                    player_index,
+                    partner_indices: teammate_indices.clone(),
+                    opponent_indices: opponent_indices.clone(),
+                },
+            };
+
+            let score = self.evaluator.evaluate(&ctx);
+
+            match action.action {
+                Split { .. } => game.undo_turn().expect("Undo must succeed"),
+                _ => game.undo_action().expect("Undo must succeed"),
+            };
+
+            // kompletter Zug rückgängig
+            game.undo_turn().expect("Undo must succeed");
+
+            if score > best_score {
+                best_score = score;
+                best_action = Some(action.clone());
+            }
+        }
+
+        best_action
     }
 }
 
@@ -60,7 +131,7 @@ mod random_bot_tests {
 
         let actions = generate_all_legal_actions(&game);
 
-        let action = bot.choose_action(actions);
+        let action = bot.choose_action(&mut game, actions);
         assert!(action.is_some(), "Bot sollte eine Aktion wählen");
     }
 
@@ -74,7 +145,7 @@ mod random_bot_tests {
         let mut bot = RandomBot::new();
         let actions = generate_all_legal_actions(&game);
 
-        let action = bot.choose_action(actions);
+        let action = bot.choose_action(&mut game, actions);
         assert!(action.is_none(), "Bot sollte None zurückgeben, wenn keine Aktionen möglich sind");
     }
 }

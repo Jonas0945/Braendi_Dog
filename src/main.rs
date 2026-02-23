@@ -109,7 +109,7 @@ fn main() {
                 game.next_player();
                 continue;
             } else {
-                let chosen = bot.choose_action(actions);
+                let chosen = bot.choose_action(&mut game, actions);
                 println!("Bot {:?} wählt: {:?}", player_color, chosen);
                 chosen.unwrap()
             }
