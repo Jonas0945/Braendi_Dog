@@ -8,6 +8,7 @@ pub type Point = usize; // 0–79
 pub const HOUSE_SIZE: usize = 4;
 pub const SEGMENT_LENGTH: usize = 16;
 
+#[derive(Clone)]
 pub struct Board {
     pub tiles: Vec<Option<Piece>>,
     pub ring_size: usize,

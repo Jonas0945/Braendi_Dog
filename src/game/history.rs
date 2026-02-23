@@ -1,6 +1,7 @@
 use crate::game::card::Card;
 use super::action::*;
 
+#[derive(Clone)]
 pub struct HistoryEntry {
     pub action: Action,
     pub played_card_index: Option<usize>,

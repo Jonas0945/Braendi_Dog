@@ -9,7 +9,7 @@ use super::history::*;
 
 const CARDS_PER_ROUND: [u8;5] = [6,5,4,3,2];
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum GameVariant {
     TwoVsTwo,
     ThreeVsThree,
@@ -18,7 +18,7 @@ pub enum GameVariant {
 }
 
 
-
+#[derive(Clone)]
 pub struct Game {
     pub game_variant: GameVariant,
     pub board: Board,
@@ -449,7 +449,6 @@ impl Game {
 
         positions
     }
-
 
     fn find_movable_pieces(&self, player_index: usize) -> Vec<usize> {
         let controllable_player_indices = self.controllable_player_indices(player_index);
