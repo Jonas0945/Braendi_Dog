@@ -74,12 +74,13 @@ impl Bot for EvalBot {
 
         let mut best_score = Score::MIN;
         let mut best_action: Option<Action> = None;
-
+        
+        // Trade phase: simulate partner action for every traded card
         if game.trading_phase {
-            // Trade phase: simulate partner action for every traded card
+            
             let partner_index = teammate_indices[0];
             let mut sim_game = game.clone();
-            sim_game.trading_phase = false; // Skip trading phase in simulation, we directly give the partner the traded cards
+            sim_game.trading_phase = false; // Skip trading phase in simulation
             let partner_teammate_indices = sim_game.teammate_indices(partner_index);
 
             // Give all cards to partner & generate all actions
@@ -93,7 +94,7 @@ impl Bot for EvalBot {
                     continue;
                 }
 
-                let sim_ctx = EvalContext {
+                let sim_context = EvalContext {
                     game: &sim_game,
                     perspective: EvalPerspective { 
                         player_index: partner_index, 
@@ -102,7 +103,7 @@ impl Bot for EvalBot {
                     },
                 };
 
-                let score = self.evaluator.evaluate(&sim_ctx);
+                let score = self.evaluator.evaluate(&sim_context);
 
                 match action.action {
                     ActionKind::Split { .. } => sim_game.undo_turn().expect("Undo must succeed"),
@@ -127,7 +128,7 @@ impl Bot for EvalBot {
                     continue;
                 }
 
-                let ctx = EvalContext {
+                let context = EvalContext {
                     game,
                     perspective: EvalPerspective {
                         player_index,
@@ -136,7 +137,7 @@ impl Bot for EvalBot {
                     },
                 };
 
-                let score = self.evaluator.evaluate(&ctx);
+                let score = self.evaluator.evaluate(&context);
 
                 match action.action {
                     ActionKind::Split { .. } => game.undo_turn().expect("Undo must succeed"),
