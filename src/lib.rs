@@ -2,7 +2,8 @@
 pub mod game;
 pub mod ui;
 pub mod ai;
-
+pub mod net;
+pub use net::*;
 //pub mod bin;
 pub use game::game::{Game, DogGame};
 pub use game::color::Color;

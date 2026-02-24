@@ -6,12 +6,42 @@ use iced::{
 use std::time::Instant;
 use std::fs::File;
 use std::io::BufReader;
+use std::sync::Arc;
 use rodio::{Decoder, OutputStream, Sink, Source}; 
-
 use braendi_dog::{Action, ActionKind, Card, Color as GameColor, DogGame, Game, GameVariant};
+use braendi_dog::client::{Client, join_running_game};
+use braendi_dog::server::GameServer;
 
+type SharedClient = Arc<tokio::sync::Mutex<Client>>;
 pub fn launch() -> iced::Result {
     DogApp::run(Settings::default())
+}
+
+async fn start_server(variant: GameVariant) -> Result<String, String> {
+    let server = GameServer::new();
+    
+    // Server startet alle Hintergrund-Tasks und gibt Ok() zurück
+    server
+        .start_server("127.0.0.1:8080")
+        .await
+        .map_err(|e| e.to_string())?;
+    
+    println!("Server läuft im Hintergrund. Drücke Strg+C zum Beenden.");
+/*
+    // Wartet unendlich, bis das Betriebssystem ein Beenden-Signal (Strg+C) sendet
+    tokio::signal::ctrl_c()
+        .await
+        .map_err(|e| e.to_string())?;*/
+    
+    println!("Server wird heruntergefahren...");
+    Ok("0.0.0.0:8080".into())
+}
+
+async fn join_server(addr: String, player_name: String) -> Result<SharedClient, String> {
+    let client = join_running_game(&addr, player_name)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(Arc::new(tokio::sync::Mutex::new(client)))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,6 +134,7 @@ struct DogApp {
     msg: String,
     join_ip_input: String,
     player_name_input: String,
+    client: Option<Arc<tokio::sync::Mutex<Client>>>,
     selected_opponent: Option<usize>,
     selected_opponent_card: Option<usize>,
 
@@ -135,8 +166,12 @@ enum Message {
     JoinIpChanged(String),
     PlayerNameChanged(String),
     HostGame,
+    PlayResult(Result<(), String>),
+    
+    ServerStarted(Result<String, String>),
     JoinGame,
-
+    JoinResult(Result<Arc<tokio::sync::Mutex<Client>>, String>),
+    HostJoined(Result<Arc<tokio::sync::Mutex<Client>>, String>),
     OpponentSelected(usize),
     OpponentCardSelected(usize),
     OpponentCardBack,
@@ -169,6 +204,7 @@ impl Application for DogApp {
             confetti: Vec::new(),
             join_ip_input: String::from("127.0.0.1:8080"),
             player_name_input: String::new(),
+            client: None,
             _audio_stream: None,
             audio_sink: None,
         };
@@ -216,7 +252,7 @@ impl Application for DogApp {
                 if let Some(anim) = &mut self.animation {
                     let animation_duration = 0.4; 
                     anim.progress += delta / animation_duration;
-                    
+        
                     if anim.progress >= 1.0 {
                         self.animation = None; 
                     }
@@ -229,7 +265,7 @@ impl Application for DogApp {
                         c.rotation += c.rot_speed * delta * 60.0;
 
                         c.vx += (rand::random::<f32>() - 0.5) * 0.2;
-                        
+
                         if c.y > self.window_size.height + 50.0 {
                             c.y = -50.0;
                             c.x = rand::random::<f32>() * self.window_size.width;
@@ -237,7 +273,6 @@ impl Application for DogApp {
                     }
                 }
             }
-
             Message::ShowRules => {
                 self.screen = Screen::Rules;
             }
@@ -246,7 +281,6 @@ impl Application for DogApp {
                 self.game = None; 
                 self.play_audio("lobby.mp3", 0.15, true);
             }
-
             Message::OpponentSelected(idx) => {
                 self.selected_opponent = Some(idx);
                 self.selected_opponent_card = None;
@@ -257,29 +291,26 @@ impl Application for DogApp {
                     );
                 }
             }
-
             Message::OpponentCardSelected(card_idx) => {
                 self.selected_opponent_card = Some(card_idx);
 
                 match self.pending_action {
                     Some(PendingAction::Grab) => {
-                        self.execute_grab(false);
+                        return self.execute_grab(false);
                     }
                     Some(PendingAction::TradeGrab) => {
-                        self.execute_grab(true);
+                        return self.execute_grab(true);
                     }
                     _ => {
                         self.msg = format!("Karte {} von Gegner gewählt.", card_idx + 1);
                     }
                 }
             }
-
             Message::OpponentCardBack => {
                 self.selected_opponent = None;
                 self.selected_opponent_card = None;
                 self.msg = "Wähle einen Gegner.".to_string();
             }
-
             Message::VariantSelected(kind) => {
                 self.selected_variant = Some(kind);
                 if kind != GameVariantKind::FreeForAll {
@@ -301,26 +332,21 @@ impl Application for DogApp {
                     self.msg = "Spiel gestartet! Wähle eine Karte.".to_string();
                 }
             }
-
             Message::CardSelected(card) => {
                 self.selected_card = Some(card);
                 self.msg = format!("Karte {:?} gewählt. Wähle Aktion rechts.", card);
                 self.pending_action = None;
             }
-
             Message::CancelPendingAction => {
                 self.pending_action = None;
                 self.msg = "Abgebrochen.".to_string();
             }
-
             Message::GameActionBtn(action_type) => {
-                self.handle_btn_click(action_type);
+                return self.handle_btn_click(action_type);
             }
-
             Message::BoardClicked(tile_index) => {
-                self.handle_board_click(tile_index);
+                return self.handle_board_click(tile_index);
             }
-
             Message::JoinIpChanged(ip) => {
                 self.join_ip_input = ip;
             }
@@ -328,14 +354,63 @@ impl Application for DogApp {
                 self.player_name_input = name;
             }
             Message::HostGame => {
-                // Später kommt hier die Server-Start Logik hin
-                println!("Hoste Spiel..."); 
+                let variant = self.build_game_variant()
+                    .expect("Variante sollte existieren");
+    
+                return Command::perform(
+                    start_server(variant),
+                    Message::ServerStarted,
+                );
             }
+            Message::ServerStarted(Ok(addr)) => {
+            let name = self.player_name_input.clone();
+            let variant = self.build_game_variant().unwrap();
+            return Command::perform(
+                async move {
+                braendi_dog::client::create_game(&addr, name, variant)
+                    .await
+                    .map(|c|  Arc::new(tokio::sync::Mutex::new(c)))
+                    .map_err(|e| e.to_string())
+            },
+                Message::HostJoined,
+            );
+             }
             Message::JoinGame => {
-                // Später kommt hier die Client-Connect Logik hin
-                println!("Verbinde zu {} als {}...", self.join_ip_input, self.player_name_input);
+                let addr = self.join_ip_input.clone();
+                let name = self.player_name_input.clone();
+
+                return Command::perform(
+                    join_server(addr, name),
+                    Message::JoinResult,
+                );
             }
-        }
+            Message::JoinResult(result) => {
+                match result {
+                    Ok(client) => {
+                        println!("Verbunden mit {}", self.join_ip_input);
+                        self.client = Some(client);
+                        self.screen = Screen::Game;
+                    }
+                    Err(e) => println!("Join fehlgeschlagen: {}", e),
+                }
+            }
+            Message::HostJoined(Ok(client)) => {
+                self.client = Some(client);
+                self.screen = Screen::Game;
+            }
+            Message::ServerStarted(Err(e)) => {
+                self.msg = format!("Server-Fehler: {}", e);
+            }
+            Message::HostJoined(Err(e)) => {
+                self.msg = format!("Verbindungsfehler: {}", e);
+            }
+            Message::PlayResult(Ok(())) => {
+                self.msg = "Zug gesendet!".into();
+            }
+            Message::PlayResult(Err(e)) => {
+                self.msg = format!("Fehler: {}", e);
+            }
+                    }
         Command::none()
     }
 
@@ -403,16 +478,16 @@ impl DogApp {
         }
     }
 
-    fn execute_grab(&mut self, trade: bool) {
+    fn execute_grab(&mut self, trade: bool)-> Command<Message> {
         let Some(card) = self.selected_card else {
             self.msg = "Keine Karte gewählt!".into();
-            return;
+            return Command::none();
         };
 
         let (Some(target_player_idx), Some(target_card)) =
             (self.selected_opponent, self.selected_opponent_card)
         else {
-            return;
+            return Command::none();
         };
 
         let game = self.game.as_mut().unwrap();
@@ -436,7 +511,7 @@ impl DogApp {
             }
         };
 
-        self.do_action(card, action);
+        return self.do_action(card, action);
     }
 
     fn get_possible_moves(&self) -> Vec<usize> {
@@ -805,6 +880,14 @@ impl DogApp {
 
 
     fn render_game(&self) -> Element<'_, Message> {
+        let Some(game) = self.game.as_ref() else {
+        return container(text("Warte auf Spielstart..."))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x()
+            .center_y()
+            .into();
+    };
         let game = self.game.as_ref().unwrap();
 
         let ui_scale = (self.window_size.width / 1024.0).max(0.7); 
@@ -1093,10 +1176,10 @@ impl DogApp {
         .into()
     }
 
-    fn handle_btn_click(&mut self, action_type: GameAction) {
+    fn handle_btn_click(&mut self, action_type: GameAction) -> Command<Message> {
         if self.selected_card.is_none() {
             self.msg = "Erst Karte wählen!".into();
-            return;
+            return Command::none();
         }
 
         let card = self.selected_card.unwrap();
@@ -1104,7 +1187,7 @@ impl DogApp {
         let (current_color, current_idx) = if let Some(g) = &self.game {
             (g.current_player().color, g.current_player_index)
         } else {
-            return;
+            return Command::none();
         };
 
         match action_type {
@@ -1141,7 +1224,7 @@ impl DogApp {
                     card: Some(card),
                     action: ActionKind::Place { target_player: current_idx },
                 };
-                self.do_action(card, act);
+                return self.do_action(card, act);
             }
             GameAction::Remove => {
                 let act = Action {
@@ -1149,7 +1232,7 @@ impl DogApp {
                     card: Some(card),
                     action: ActionKind::Remove,
                 };
-                self.do_action(card, act);
+                return self.do_action(card, act);
             }
             GameAction::Trade => {
                 let act = Action {
@@ -1157,15 +1240,16 @@ impl DogApp {
                     card: Some(card),
                     action: ActionKind::Trade,
                 };
-                self.do_action(card, act);
+                return self.do_action(card, act);
             }
         }
+        Command::none()
     }
 
-    fn handle_board_click(&mut self, tile_idx: usize) {
+    fn handle_board_click(&mut self, tile_idx: usize) -> Command<Message> {
         if self.selected_card.is_none() {
             self.msg = format!("Feld {} geklickt. Wähle erst Karte!", tile_idx);
-            return;
+            return Command::none();
         }
 
         let card = self.selected_card.unwrap();
@@ -1173,7 +1257,7 @@ impl DogApp {
         let current_color = if let Some(g) = &self.game {
             g.current_player().color
         } else {
-            return;
+            return Command::none();
         };
 
         if let Some(pending) = self.pending_action.clone() {
@@ -1194,7 +1278,7 @@ impl DogApp {
                             card: Some(card),
                             action: action_kind,
                         };
-                        self.do_action(card, act);
+                        return self.do_action(card, act);
                     } else {
                         self.pending_action = Some(PendingAction::Move { from: Some(tile_idx) });
                         self.msg = format!("Start: {}. Wähle Ziel!", tile_idx);
@@ -1211,16 +1295,17 @@ impl DogApp {
                             card: Some(card),
                             action: ActionKind::Interchange { a: first_idx, b: tile_idx },
                         };
-                        self.do_action(card, act);
+                        return self.do_action(card, act);
                     }
                 },
             }
         } else {
             self.msg = "Wähle rechts erst eine Aktion (z.B. Move).".to_string();
         }
+        Command::none()
     }
 
-    fn do_action(&mut self, card: Card, mut action: Action) {
+    fn do_action(&mut self, card: Card, mut action: Action) -> Command<Message>{
         let mut is_move = false;
         let mut from_idx = 0;
         let mut to_idx = 0;
@@ -1274,34 +1359,37 @@ impl DogApp {
             GameColor::Orange => IcedColor::from_rgb(1.0, 0.65, 0.0),
         };
 
+       if let Some(client) = &self.client {
+    // Netzwerk-Modus
+        let client = Arc::clone(client);
+        let play_str = action.to_string();
+        
+        self.selected_card = None;
+        self.pending_action = None;
+        self.selected_opponent = None;
+        self.selected_opponent_card = None;
+        
+        Command::perform(
+            async move {
+                client.lock().await.make_play(&play_str).await
+                    .map_err(|e| e.to_string())
+            },
+            Message::PlayResult,
+        )
+    } else {
+        // Lokaler Modus 
         if let Some(game) = self.game.as_mut() {
             match game.action(action.card, action) {
-                Ok(_) => {
-                    self.msg = "Zug erfolgreich!".into();
-                    
-                    if is_move {
-                        self.animation = Some(MoveAnimation {
-                            from: from_idx,
-                            to: to_idx,
-                            color: anim_color_iced,
-                            progress: 0.0,
-                            from_zwinger_of_player: from_zwinger,
-                        });
-                        self.last_tick = Instant::now();
-                    }
-
-                    if game.is_winner() {
-                        self.trigger_win(current_color_enum);
-                    }
-                },
+                Ok(_) => { /* animation etc */ }
                 Err(e) => self.msg = format!("Fehler: {}", e),
             }
-
             self.selected_card = None;
             self.pending_action = None;
             self.selected_opponent = None;
             self.selected_opponent_card = None;
         }
+        Command::none()
+    }
     }
 }
 
