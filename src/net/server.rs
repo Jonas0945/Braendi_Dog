@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use crate::{BeginGameMesage, Game, game::player::Player};
+use crate::{BeginGameMesage, Game, DogGame, game::player::Player};
 use tokio::net::tcp::OwnedWriteHalf;
 
 type ClientID = usize;
@@ -87,7 +87,8 @@ impl GameServer {
                                         player_name,
                                     } => {
                                         if game_guard.is_none() {
-                                            let new_game = Game::new(variant);
+                                            let mut new_game = Game::new(variant);
+                                            new_game.new_round();
                                             *game_guard = Some(new_game);
 
                                             if let Some(player_0) =
@@ -104,25 +105,27 @@ impl GameServer {
                                             return;
                                         }
 
+                                        let msg1 =
+                                            serde_json::to_string(&ServerNachrich::Welcome(0))
+                                                .unwrap()
+                                                + "\n";
                                         let game_clone = game_guard.as_ref().unwrap().clone();
-                                        let msg = serde_json::to_string(&ServerNachrich::State(
+                                        let msg2 = serde_json::to_string(&ServerNachrich::State(
                                             game_clone,
                                         ))
                                         .unwrap()
                                             + "\n";
-                                        Some(msg)
+                                        Some(msg1 + &msg2)
                                     }
                                     BeginGameMesage::SpielBeitreten { player_name } => {
                                         if let Some(game) = game_guard.as_ref() {
                                             let max_allowed = game.players.len();
-
                                             let used_colors: Vec<_> = inner_client_to_index_ref
                                                 .lock()
                                                 .unwrap()
                                                 .values()
                                                 .cloned()
                                                 .collect();
-
                                             let free_slot = (0..max_allowed).find(|&i| {
                                                 !used_colors.contains(&game.players[i].color)
                                             });
@@ -134,17 +137,22 @@ impl GameServer {
                                                     .unwrap()
                                                     .insert(netzwerk_id, player.color);
                                                 println!(
-                                                    "Client '{}' hat sich angemeldet",
-                                                    player_name
+                                                    "Client '{}' hat sich angemeldet als Slot {}",
+                                                    player_name, slot
                                                 );
 
+                                                let msg1 = serde_json::to_string(
+                                                    &ServerNachrich::Welcome(slot),
+                                                )
+                                                .unwrap()
+                                                    + "\n";
                                                 let game_clone = game.clone();
-                                                let msg = serde_json::to_string(
+                                                let msg2 = serde_json::to_string(
                                                     &ServerNachrich::State(game_clone),
                                                 )
                                                 .unwrap()
                                                     + "\n";
-                                                Some(msg)
+                                                Some(msg1 + &msg2)
                                             } else {
                                                 println!("Kein freier Platz mehr.");
                                                 None
