@@ -1,6 +1,6 @@
 use braendi_dog::client::{Client, join_running_game};
 use braendi_dog::server::GameServer;
-use braendi_dog::{Action, ActionKind, Card, Color as GameColor, DogGame, Game, GameVariant};
+use braendi_dog::{Action, ActionKind, Card, Color as GameColor, DogGame, Game, GameVariant, ServerNachrich};
 use futures::SinkExt;
 use iced::widget::{
     button, canvas, column, container, pick_list, row, scrollable, text, text_input,
@@ -13,6 +13,7 @@ use rodio::{Decoder, OutputStream, Sink, Source};
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
+use std::net::UdpSocket;
 use std::time::Instant;
 
 type SharedClient = Arc<tokio::sync::Mutex<Client>>;
@@ -21,15 +22,22 @@ pub fn launch() -> iced::Result {
     DogApp::run(Settings::default())
 }
 
-async fn start_server(variant: GameVariant) -> Result<String, String> {
+async fn start_server(addr: String) -> Result<String, String> {
     let server = GameServer::new();
     server
-        .start_server("0.0.0.0:8080")
+        .start_server(&addr)
         .await
         .map_err(|e| e.to_string())?;
-    Ok("127.0.0.1:8080".into())
-}
+     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
+    let lan_ip = UdpSocket::bind("0.0.0.0:0")
+        .and_then(|s| { s.connect("8.8.8.8:80")?; s.local_addr() })
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|_| "127.0.0.1".to_string());
+
+    let port = addr.split(':').last().unwrap_or("8080");
+    Ok(format!("{}:{}", lan_ip, port))
+}
 async fn join_server(addr: String, player_name: String) -> Result<SharedClient, String> {
     let client = join_running_game(&addr, player_name)
         .await
@@ -123,6 +131,7 @@ struct DogApp {
     pending_action: Option<PendingAction>,
     msg: String,
     join_ip_input: String,
+    bind_addr_input: String,
     player_name_input: String,
     client: Option<SharedClient>,
 
@@ -152,6 +161,7 @@ enum Message {
     GameActionBtn(GameAction),
     CancelPendingAction,
     JoinIpChanged(String),
+    BindAddrChanged(String),
     PlayerNameChanged(String),
     HostGame,
     PlayResult(Result<(), String>),
@@ -188,6 +198,7 @@ impl Application for DogApp {
             last_tick: Instant::now(),
             confetti: Vec::new(),
             join_ip_input: String::from("127.0.0.1:8080"),
+            bind_addr_input: String::from("0.0.0.0:8080"),
             player_name_input: String::new(),
             client: None,
             local_player_index: None,
@@ -359,6 +370,9 @@ impl Application for DogApp {
             Message::JoinIpChanged(ip) => {
                 self.join_ip_input = ip;
             }
+            Message::BindAddrChanged(addr) => {
+                self.bind_addr_input = addr;
+            }
             Message::PlayerNameChanged(name) => {
                 self.player_name_input = name;
             }
@@ -367,12 +381,19 @@ impl Application for DogApp {
                     self.msg = "Bitte gib deinen Namen ein!".into();
                     return Command::none();
                 }
-                if let Some(variant) = self.build_game_variant() {
+                if self.bind_addr_input.trim().is_empty() {
+                    self.msg = "Bitte gib eine Bind-Adresse ein!".into();
+                    return Command::none();
+                }
+                if self.build_game_variant().is_some() {
                     self.msg = "Starte Server...".into();
-                    return Command::perform(start_server(variant), Message::ServerStarted);
+                    let addr = self.bind_addr_input.clone();
+                    return Command::perform(start_server(addr), Message::ServerStarted);
                 }
             }
             Message::ServerStarted(Ok(addr)) => {
+                // tell the user where the server is bound so they can share it
+                self.msg = format!("Server läuft unter {}", addr);
                 let name = self.player_name_input.clone();
                 let variant = self.build_game_variant().unwrap();
                 return Command::perform(
@@ -625,7 +646,11 @@ impl DogApp {
             )
             .placeholder("Spielmodus wählen...")
             .width(Length::Fixed(300.0))
-            .padding(15)
+            .padding(15),
+            text_input("Bind-Adresse (z.B. 0.0.0.0:8080)", &self.bind_addr_input)
+                .on_input(Message::BindAddrChanged)
+                .padding(15)
+                .width(Length::Fixed(300.0)),
         ]
         .spacing(10)
         .align_items(iced::Alignment::Center);
@@ -664,6 +689,15 @@ impl DogApp {
                 .spacing(15),
             );
 
+            if self.msg.starts_with("Server läuft") {
+    host_controls = host_controls.push(
+        text(&self.msg)
+            .size(16)
+            .style(IcedColor::from_rgb(0.3, 1.0, 0.5))
+            .horizontal_alignment(iced::alignment::Horizontal::Center)
+    );
+}
+
         let join_controls = column![
             text("Oder bestehendem Spiel beitreten:")
                 .size(18)
@@ -673,7 +707,7 @@ impl DogApp {
                 .on_input(Message::PlayerNameChanged)
                 .padding(15)
                 .width(Length::Fixed(300.0)),
-            text_input("IP-Adresse (z.B. 127.0.0.1:8080)", &self.join_ip_input)
+            text_input("Server-Adresse (z.B. 127.0.0.1:8080)", &self.join_ip_input)
                 .on_input(Message::JoinIpChanged)
                 .padding(15)
                 .width(Length::Fixed(300.0)),

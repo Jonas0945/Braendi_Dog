@@ -10,8 +10,11 @@ use braendi_dog::net::{start_server, start_client};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-	// server side
-	let server = start_server("127.0.0.1:4000").await?;
+	// server side – you can specify the bind address dynamically
+	let bind_addr = "0.0.0.0:4000".to_string();
+	let server = start_server(bind_addr.clone()).await?;
+	// start_server returns the address it actually bound to, which
+	// caller can then share with clients
 	let mut rx = server.subscribe();
 
 	// spawn a task to handle incoming network events
