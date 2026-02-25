@@ -35,7 +35,7 @@ async fn start_server(addr: String) -> Result<String, String> {
         .map(|a| a.ip().to_string())
         .unwrap_or_else(|_| "127.0.0.1".to_string());
 
-    let port = addr.split(':').last().unwrap_or("8080");
+    let port = addr.split(':').last().unwrap_or("8333");
     Ok(format!("{}:{}", lan_ip, port))
 }
 async fn join_server(addr: String, player_name: String) -> Result<SharedClient, String> {
@@ -197,8 +197,8 @@ impl Application for DogApp {
             animation: None,
             last_tick: Instant::now(),
             confetti: Vec::new(),
-            join_ip_input: String::from("127.0.0.1:8080"),
-            bind_addr_input: String::from("0.0.0.0:8080"),
+            join_ip_input: String::from("127.0.0.1:8333"),
+            bind_addr_input: String::from("0.0.0.0:8333"),
             player_name_input: String::new(),
             client: None,
             local_player_index: None,
