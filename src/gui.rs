@@ -14,6 +14,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
 use std::time::Instant;
+
 type SharedClient = Arc<tokio::sync::Mutex<Client>>;
 
 pub fn launch() -> iced::Result {
@@ -43,7 +44,6 @@ enum GameVariantKind {
     TwoVsTwoVsTwo,
     FreeForAll,
 }
-
 impl GameVariantKind {
     const ALL: [GameVariantKind; 4] = [
         GameVariantKind::TwoVsTwo,
@@ -52,16 +52,18 @@ impl GameVariantKind {
         GameVariantKind::FreeForAll,
     ];
 }
-
 impl std::fmt::Display for GameVariantKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let label = match self {
-            GameVariantKind::TwoVsTwo => "2 vs 2",
-            GameVariantKind::ThreeVsThree => "3 vs 3",
-            GameVariantKind::TwoVsTwoVsTwo => "2 vs 2 vs 2",
-            GameVariantKind::FreeForAll => "Free For All",
-        };
-        write!(f, "{label}")
+        write!(
+            f,
+            "{}",
+            match self {
+                GameVariantKind::TwoVsTwo => "2 vs 2",
+                GameVariantKind::ThreeVsThree => "3 vs 3",
+                GameVariantKind::TwoVsTwoVsTwo => "2 vs 2 vs 2",
+                GameVariantKind::FreeForAll => "Free For All",
+            }
+        )
     }
 }
 
@@ -99,7 +101,6 @@ struct MoveAnimation {
     progress: f32,
     from_zwinger_of_player: Option<usize>,
 }
-
 #[derive(Debug, Clone)]
 struct Confetti {
     x: f32,
@@ -124,6 +125,10 @@ struct DogApp {
     join_ip_input: String,
     player_name_input: String,
     client: Option<SharedClient>,
+
+    // NEU: Damit die GUI weiß, wer WIR am PC eigentlich sind!
+    local_player_index: Option<usize>,
+
     selected_opponent: Option<usize>,
     selected_opponent_card: Option<usize>,
     animation: Option<MoveAnimation>,
@@ -157,9 +162,7 @@ enum Message {
     OpponentSelected(usize),
     OpponentCardSelected(usize),
     OpponentCardBack,
-
     IncomingNetwork(braendi_dog::ServerNachrich),
-
     None,
 }
 
@@ -187,12 +190,11 @@ impl Application for DogApp {
             join_ip_input: String::from("127.0.0.1:8080"),
             player_name_input: String::new(),
             client: None,
+            local_player_index: None,
             _audio_stream: None,
             audio_sink: None,
         };
-
         app.play_audio("lobby.mp3", 0.15, true);
-
         (app, Command::none())
     }
 
@@ -208,7 +210,6 @@ impl Application for DogApp {
                 Message::None
             }
         })];
-
         let needs_tick = self.animation.is_some() || matches!(self.screen, Screen::GameOver { .. });
         if needs_tick {
             subs.push(window::frames().map(|_| Message::Tick(Instant::now())));
@@ -224,12 +225,10 @@ impl Application for DogApp {
                         let mut guard = client_clone.lock().await;
                         guard.reader.take()
                     };
-
                     if let Some(mut reader) = maybe_reader {
                         use tokio::io::AsyncBufReadExt;
                         let mut buf_reader = tokio::io::BufReader::new(&mut reader);
                         let mut line = String::new();
-
                         loop {
                             line.clear();
                             match buf_reader.read_line(&mut line).await {
@@ -239,7 +238,6 @@ impl Application for DogApp {
                                     if trimmed.is_empty() {
                                         continue;
                                     }
-
                                     if let Ok(server_msg) =
                                         serde_json::from_str::<braendi_dog::ServerNachrich>(trimmed)
                                     {
@@ -252,7 +250,6 @@ impl Application for DogApp {
                             }
                         }
                     }
-
                     loop {
                         tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
                     }
@@ -260,7 +257,6 @@ impl Application for DogApp {
             );
             subs.push(net_sub);
         }
-
         Subscription::batch(subs)
     }
 
@@ -273,14 +269,12 @@ impl Application for DogApp {
             Message::Tick(now) => {
                 let delta = now.duration_since(self.last_tick).as_secs_f32();
                 self.last_tick = now;
-
                 if let Some(anim) = &mut self.animation {
                     anim.progress += delta / 0.4;
                     if anim.progress >= 1.0 {
                         self.animation = None;
                     }
                 }
-
                 if matches!(self.screen, Screen::GameOver { .. }) {
                     for c in &mut self.confetti {
                         c.x += c.vx * delta * 60.0;
@@ -300,7 +294,8 @@ impl Application for DogApp {
             Message::BackToStart => {
                 self.screen = Screen::Start;
                 self.game = None;
-                self.client = None; // Client Trennen beim Zurückgehen
+                self.client = None;
+                self.local_player_index = None;
                 self.play_audio("lobby.mp3", 0.15, true);
             }
             Message::OpponentSelected(idx) => {
@@ -344,6 +339,7 @@ impl Application for DogApp {
                     let mut game = Game::new(variant);
                     game.new_round();
                     self.game = Some(game);
+                    self.local_player_index = None; // Lokales Spiel = Perspektive rotiert
                     self.screen = Screen::Game;
                 }
             }
@@ -394,7 +390,7 @@ impl Application for DogApp {
                     self.msg = "Bitte gib deinen Namen ein!".into();
                     return Command::none();
                 }
-                self.screen = Screen::Game; // Springe direkt in Wartebildschirm
+                self.msg = "Verbinde...".into();
                 let addr = self.join_ip_input.clone();
                 let name = self.player_name_input.clone();
                 return Command::perform(join_server(addr, name), Message::JoinResult);
@@ -403,6 +399,7 @@ impl Application for DogApp {
                 Ok(client) => {
                     self.client = Some(client);
                     self.screen = Screen::Game;
+                    self.msg = "Warte auf Brettdaten...".into();
                 }
                 Err(e) => {
                     self.msg = format!("Fehler beim Beitreten: {}", e);
@@ -419,22 +416,37 @@ impl Application for DogApp {
                 self.msg = format!("Fehler: {}", e);
             }
 
-            Message::IncomingNetwork(net_msg) => match net_msg {
-                braendi_dog::ServerNachrich::State(new_game) => {
-                    self.game = Some(new_game);
-                    self.msg = "Spielstand synchronisiert.".to_string();
-
-                    if let Some(game) = &self.game {
-                        if game.is_winner() {
-                            let winner_color = game.current_player().color;
-                            self.trigger_win(winner_color);
+            Message::IncomingNetwork(net_msg) => {
+                match net_msg {
+                    braendi_dog::ServerNachrich::Welcome(idx) => {
+                        // FIX: Server verrät uns unsere Farbe!
+                        self.local_player_index = Some(idx);
+                        self.msg = format!("Verbunden! Du bist Spieler {}.", idx);
+                    }
+                    braendi_dog::ServerNachrich::State(new_game) => {
+                        self.game = Some(new_game);
+                        if let Some(game) = &self.game {
+                            let my_idx =
+                                self.local_player_index.unwrap_or(game.current_player_index);
+                            if my_idx == game.current_player_index {
+                                self.msg = "Du bist am Zug!".to_string();
+                            } else {
+                                self.msg = format!(
+                                    "Spieler {:?} (P{}) ist am Zug.",
+                                    game.current_player().color,
+                                    game.current_player_index
+                                );
+                            }
+                            if game.is_winner() {
+                                self.trigger_win(game.current_player().color);
+                            }
                         }
                     }
+                    braendi_dog::ServerNachrich::Fehler(err_msg) => {
+                        self.msg = err_msg;
+                    }
                 }
-                braendi_dog::ServerNachrich::Fehler(err_msg) => {
-                    self.msg = err_msg;
-                }
-            },
+            }
         }
         Command::none()
     }
@@ -463,7 +475,6 @@ impl DogApp {
                             sink.append(source);
                         }
                         sink.play();
-
                         self._audio_stream = Some(stream);
                         self.audio_sink = Some(sink);
                     }
@@ -504,26 +515,24 @@ impl DogApp {
         let Some(card) = self.selected_card else {
             return Command::none();
         };
-
         let (Some(target_player_idx), Some(target_card)) =
             (self.selected_opponent, self.selected_opponent_card)
         else {
             return Command::none();
         };
-
         let game = self.game.as_mut().unwrap();
-        let current_color = game.current_player().color;
+        let my_idx = self.local_player_index.unwrap_or(game.current_player_index);
         let target_color = game.players[target_player_idx].color;
 
         let action = if trade {
             Action {
-                player: current_color,
+                player: game.players[my_idx].color,
                 card: None,
                 action: ActionKind::TradeGrab { target_card },
             }
         } else {
             Action {
-                player: current_color,
+                player: game.players[my_idx].color,
                 card: Some(card),
                 action: ActionKind::Grab {
                     target_player: target_color,
@@ -531,11 +540,10 @@ impl DogApp {
                 },
             }
         };
-
         return self.do_action(card, action);
     }
 
-    fn get_possible_moves(&self) -> Vec<usize> {
+    fn get_possible_moves(&self, my_idx: usize) -> Vec<usize> {
         let (
             Some(game),
             Some(PendingAction::Move {
@@ -546,7 +554,6 @@ impl DogApp {
         else {
             return vec![];
         };
-
         let mut distances: Vec<i8> = card
             .possible_distances()
             .into_iter()
@@ -555,7 +562,6 @@ impl DogApp {
         if matches!(card, Card::Joker | Card::Four) {
             distances.push(-4);
         }
-
         let mut targets = Vec::new();
         let board_len = game.board.tiles.len();
 
@@ -567,13 +573,9 @@ impl DogApp {
             }
             for to_idx in 0..board_len {
                 let ok = if backward {
-                    game.board
-                        .distance_between(to_idx, *from_idx, game.current_player_index)
-                        == Some(abs_dist)
+                    game.board.distance_between(to_idx, *from_idx, my_idx) == Some(abs_dist)
                 } else {
-                    game.board
-                        .distance_between(*from_idx, to_idx, game.current_player_index)
-                        == Some(abs_dist)
+                    game.board.distance_between(*from_idx, to_idx, my_idx) == Some(abs_dist)
                 };
                 if ok {
                     targets.push(to_idx);
@@ -601,231 +603,207 @@ impl DogApp {
     }
 
     fn render_start(&self) -> Element<'_, Message> {
-        let title = text("Brändi Dog")
-            .size(80)
-            .style(IcedColor::from_rgb(0.9, 0.75, 0.2))
-            .horizontal_alignment(iced::alignment::Horizontal::Center);
-
-        let subtitle = text("Willkommen am Spieltisch")
-            .size(22)
-            .style(IcedColor::from_rgb(0.7, 0.7, 0.7))
-            .horizontal_alignment(iced::alignment::Horizontal::Center);
-
-        let host_instruction = text("Neues Spiel erstellen:")
+        let msg_color = if self.msg.contains("Fehler") || self.msg.contains("Bitte") {
+            IcedColor::from_rgb(1.0, 0.4, 0.4)
+        } else {
+            IcedColor::from_rgb(0.6, 0.9, 0.6)
+        };
+        let status_msg = text(&self.msg)
             .size(18)
-            .style(IcedColor::WHITE)
+            .style(msg_color)
             .horizontal_alignment(iced::alignment::Horizontal::Center);
 
-        let dropdown = pick_list(
-            &GameVariantKind::ALL[..],
-            self.selected_variant,
-            Message::VariantSelected,
-        )
-        .placeholder("Spielmodus wählen...")
-        .width(Length::Fixed(300.0))
-        .padding(15);
-
-        let mut host_controls = column![host_instruction, dropdown]
-            .spacing(10)
-            .align_items(iced::Alignment::Center);
-
+        let mut host_controls = column![
+            text("Neues Spiel erstellen:")
+                .size(18)
+                .style(IcedColor::WHITE)
+                .horizontal_alignment(iced::alignment::Horizontal::Center),
+            pick_list(
+                &GameVariantKind::ALL[..],
+                self.selected_variant,
+                Message::VariantSelected
+            )
+            .placeholder("Spielmodus wählen...")
+            .width(Length::Fixed(300.0))
+            .padding(15)
+        ]
+        .spacing(10)
+        .align_items(iced::Alignment::Center);
         if self.selected_variant == Some(GameVariantKind::FreeForAll) {
-            let ffa_input = text_input("Anzahl Spieler (2-6)", &self.ffa_players_input)
-                .on_input(Message::FreeForAllPlayersChanged)
-                .padding(15)
-                .width(Length::Fixed(300.0));
-            host_controls =
-                host_controls.push(iced::widget::Space::with_height(Length::Fixed(5.0)));
-            host_controls = host_controls.push(ffa_input);
+            host_controls = host_controls
+                .push(iced::widget::Space::with_height(Length::Fixed(5.0)))
+                .push(
+                    text_input("Anzahl Spieler (2-6)", &self.ffa_players_input)
+                        .on_input(Message::FreeForAllPlayersChanged)
+                        .padding(15)
+                        .width(Length::Fixed(300.0)),
+                );
         }
 
         let can_start = self.build_game_variant().is_some();
-
-        let start_local_btn = button(
-            text("Lokal Starten")
-                .size(18)
-                .horizontal_alignment(iced::alignment::Horizontal::Center),
-        )
-        .padding([12, 30])
-        .on_press_maybe(can_start.then_some(Message::StartGame));
-
-        let host_btn = button(
-            text("Spiel Hosten")
-                .size(18)
-                .horizontal_alignment(iced::alignment::Horizontal::Center),
-        )
-        .padding([12, 30])
-        .style(iced::theme::Button::Positive)
-        .on_press_maybe(can_start.then_some(Message::HostGame));
-
-        host_controls = host_controls.push(iced::widget::Space::with_height(Length::Fixed(10.0)));
-        host_controls = host_controls.push(row![start_local_btn, host_btn].spacing(15));
-
-        let join_instruction = text("Oder bestehendem Spiel beitreten:")
-            .size(18)
-            .style(IcedColor::WHITE)
-            .horizontal_alignment(iced::alignment::Horizontal::Center);
-
-        let name_input = text_input("Dein Spielername...", &self.player_name_input)
-            .on_input(Message::PlayerNameChanged)
-            .padding(15)
-            .width(Length::Fixed(300.0));
-
-        let ip_input = text_input("IP-Adresse (z.B. 127.0.0.1:8080)", &self.join_ip_input)
-            .on_input(Message::JoinIpChanged)
-            .padding(15)
-            .width(Length::Fixed(300.0));
-
-        let join_btn = button(
-            text("Spiel Beitreten")
-                .size(20)
-                .horizontal_alignment(iced::alignment::Horizontal::Center),
-        )
-        .padding([15, 60])
-        .style(iced::theme::Button::Primary)
-        .on_press(Message::JoinGame);
+        host_controls = host_controls
+            .push(iced::widget::Space::with_height(Length::Fixed(10.0)))
+            .push(
+                row![
+                    button(
+                        text("Lokal Starten")
+                            .size(18)
+                            .horizontal_alignment(iced::alignment::Horizontal::Center)
+                    )
+                    .padding([12, 30])
+                    .on_press_maybe(can_start.then_some(Message::StartGame)),
+                    button(
+                        text("Spiel Hosten")
+                            .size(18)
+                            .horizontal_alignment(iced::alignment::Horizontal::Center)
+                    )
+                    .padding([12, 30])
+                    .style(iced::theme::Button::Positive)
+                    .on_press_maybe(can_start.then_some(Message::HostGame))
+                ]
+                .spacing(15),
+            );
 
         let join_controls = column![
-            join_instruction,
-            name_input,
-            ip_input,
+            text("Oder bestehendem Spiel beitreten:")
+                .size(18)
+                .style(IcedColor::WHITE)
+                .horizontal_alignment(iced::alignment::Horizontal::Center),
+            text_input("Dein Spielername...", &self.player_name_input)
+                .on_input(Message::PlayerNameChanged)
+                .padding(15)
+                .width(Length::Fixed(300.0)),
+            text_input("IP-Adresse (z.B. 127.0.0.1:8080)", &self.join_ip_input)
+                .on_input(Message::JoinIpChanged)
+                .padding(15)
+                .width(Length::Fixed(300.0)),
             iced::widget::Space::with_height(Length::Fixed(5.0)),
-            join_btn
+            button(
+                text("Spiel Beitreten")
+                    .size(20)
+                    .horizontal_alignment(iced::alignment::Horizontal::Center)
+            )
+            .padding([15, 60])
+            .style(iced::theme::Button::Primary)
+            .on_press(Message::JoinGame)
         ]
         .spacing(10)
         .align_items(iced::Alignment::Center);
 
-        let rules_btn = button(
-            text("Spielregeln")
-                .size(16)
-                .horizontal_alignment(iced::alignment::Horizontal::Center),
-        )
-        .padding([10, 30])
-        .style(iced::theme::Button::Secondary)
-        .on_press(Message::ShowRules);
-
-        let menu_card = container(
-            column![
-                title,
-                subtitle,
-                iced::widget::Space::with_height(Length::Fixed(40.0)),
-                host_controls,
-                iced::widget::Space::with_height(Length::Fixed(30.0)),
-                join_controls,
-                iced::widget::Space::with_height(Length::Fixed(30.0)),
-                rules_btn,
-            ]
-            .align_items(iced::Alignment::Center),
-        )
-        .padding(50)
-        .style(|_: &Theme| container::Appearance {
-            background: Some(iced::Background::Color(IcedColor::from_rgba(
-                0.0, 0.0, 0.0, 0.6,
-            ))),
-            border: iced::Border {
-                radius: 20.0.into(),
-                width: 3.0,
-                color: IcedColor::from_rgb(0.6, 0.4, 0.2),
-            },
-            ..Default::default()
-        });
-
-        container(menu_card)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x()
-            .center_y()
+        container(
+            container(
+                column![
+                    text("Brändi Dog")
+                        .size(80)
+                        .style(IcedColor::from_rgb(0.9, 0.75, 0.2))
+                        .horizontal_alignment(iced::alignment::Horizontal::Center),
+                    text("Willkommen am Spieltisch")
+                        .size(22)
+                        .style(IcedColor::from_rgb(0.7, 0.7, 0.7))
+                        .horizontal_alignment(iced::alignment::Horizontal::Center),
+                    iced::widget::Space::with_height(Length::Fixed(20.0)),
+                    status_msg,
+                    iced::widget::Space::with_height(Length::Fixed(20.0)),
+                    host_controls,
+                    iced::widget::Space::with_height(Length::Fixed(30.0)),
+                    join_controls,
+                    iced::widget::Space::with_height(Length::Fixed(30.0)),
+                    button(
+                        text("Spielregeln")
+                            .size(16)
+                            .horizontal_alignment(iced::alignment::Horizontal::Center)
+                    )
+                    .padding([10, 30])
+                    .style(iced::theme::Button::Secondary)
+                    .on_press(Message::ShowRules),
+                ]
+                .align_items(iced::Alignment::Center),
+            )
+            .padding(50)
             .style(|_: &Theme| container::Appearance {
-                background: Some(iced::Background::Color(IcedColor::from_rgb(0.1, 0.3, 0.2))),
+                background: Some(iced::Background::Color(IcedColor::from_rgba(
+                    0.0, 0.0, 0.0, 0.6,
+                ))),
+                border: iced::Border {
+                    radius: 20.0.into(),
+                    width: 3.0,
+                    color: IcedColor::from_rgb(0.6, 0.4, 0.2),
+                },
                 ..Default::default()
-            })
-            .into()
+            }),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x()
+        .center_y()
+        .style(|_: &Theme| container::Appearance {
+            background: Some(iced::Background::Color(IcedColor::from_rgb(0.1, 0.3, 0.2))),
+            ..Default::default()
+        })
+        .into()
     }
 
     fn render_rules(&self) -> Element<'_, Message> {
-        let title = text("Spielregeln")
-            .size(50)
-            .style(IcedColor::from_rgb(0.9, 0.75, 0.2))
-            .horizontal_alignment(iced::alignment::Horizontal::Center)
-            .width(Length::Fill);
-        let rules_text_content = "Ziel des Spiels:\n\
-            Bringe alle eigenen Murmeln (und die deines Teampartners) vom Zwinger sicher in den Zielbereich (Haus).\n\n\
-            Karten und ihre Bedeutung:\n\
-            • Ass, König, Joker: Ermöglicht das Setzen einer Figur aus dem Zwinger auf das Startfeld. Das Startfeld ist danach blockiert und schützt diese Figur.\n\
-            • 4: Genau 4 Felder rückwärts fahren. Man darf hiermit jedoch nicht rückwärts ins eigene Haus einziehen!\n\
-            • 7: Aufteilen (Split). Die 7 Schritte dürfen auf beliebig viele eigene Figuren (oder die des Partners, wenn man im Haus ist) aufgeteilt werden. Überspringt man mit der 7 eine andere Figur, wird diese geschlagen (abgeräumt).\n\
-            • Bube (Jack): Tauscht die Position einer eigenen mit einer gegnerischen Figur. Figuren auf Start- oder Hausfeldern dürfen nicht getauscht werden.\n\
-            • Joker: Kann als eine beliebige andere Karte gespielt werden.\n\
-            • Alle anderen Zahlenkarten (2, 3, 5, 6, 8, 9, 10, Dame/12): Genau diese Anzahl Felder vorwärts ziehen.\n\n\
-            Spielablauf:\n\
-            1. Karten tauschen (nur in Team-Modi): Zu Beginn jeder Runde tauschen die Teampartner blind eine Karte aus.\n\
-            2. Reihum wird jeweils eine Karte ausgespielt und der entsprechende Zug ausgeführt.\n\
-            3. Wer nicht ziehen kann, MUSS eine Karte abwerfen (Remove).\n\n\
-            Schlagen:\n\
-            Landet deine Figur exakt auf einem Feld, das bereits besetzt ist (egal ob Gegner oder eigenes Team), wird die dortige Figur geschlagen und muss zurück in den Zwinger.";
-        let scrollable_content = scrollable(
-            text(rules_text_content)
-                .size(18)
-                .style(IcedColor::from_rgb(0.9, 0.9, 0.9))
-                .width(Length::Fill),
-        )
-        .height(Length::Fill);
-        let back_btn = container(
-            button(
-                text("Zurück zum Menü")
-                    .size(20)
-                    .horizontal_alignment(iced::alignment::Horizontal::Center),
+        let rules_text_content = "Viel Text ..."; // BITTE WIEDER REGELN EINFÜGEN!
+        container(
+            container(
+                column![
+                    text("Spielregeln")
+                        .size(50)
+                        .style(IcedColor::from_rgb(0.9, 0.75, 0.2))
+                        .horizontal_alignment(iced::alignment::Horizontal::Center)
+                        .width(Length::Fill),
+                    iced::widget::Space::with_height(Length::Fixed(20.0)),
+                    scrollable(
+                        text(rules_text_content)
+                            .size(18)
+                            .style(IcedColor::from_rgb(0.9, 0.9, 0.9))
+                            .width(Length::Fill)
+                    )
+                    .height(Length::Fill),
+                    iced::widget::Space::with_height(Length::Fixed(20.0)),
+                    container(
+                        button(
+                            text("Zurück zum Menü")
+                                .size(20)
+                                .horizontal_alignment(iced::alignment::Horizontal::Center)
+                        )
+                        .padding([10, 40])
+                        .style(iced::theme::Button::Destructive)
+                        .on_press(Message::BackToStart)
+                    )
+                    .width(Length::Fill)
+                    .center_x()
+                ]
+                .padding(40),
             )
-            .padding([10, 40])
-            .style(iced::theme::Button::Destructive)
-            .on_press(Message::BackToStart),
+            .width(Length::Fixed(850.0))
+            .height(Length::FillPortion(8))
+            .style(|_: &Theme| container::Appearance {
+                background: Some(iced::Background::Color(IcedColor::from_rgba(
+                    0.0, 0.0, 0.0, 0.7,
+                ))),
+                border: iced::Border {
+                    radius: 20.0.into(),
+                    width: 3.0,
+                    color: IcedColor::from_rgb(0.6, 0.4, 0.2),
+                },
+                ..Default::default()
+            }),
         )
         .width(Length::Fill)
-        .center_x();
-
-        let rules_card = container(
-            column![
-                title,
-                iced::widget::Space::with_height(Length::Fixed(20.0)),
-                scrollable_content,
-                iced::widget::Space::with_height(Length::Fixed(20.0)),
-                back_btn
-            ]
-            .padding(40),
-        )
-        .width(Length::Fixed(850.0))
-        .height(Length::FillPortion(8))
+        .height(Length::Fill)
+        .center_x()
+        .center_y()
+        .padding(40)
         .style(|_: &Theme| container::Appearance {
-            background: Some(iced::Background::Color(IcedColor::from_rgba(
-                0.0, 0.0, 0.0, 0.7,
-            ))),
-            border: iced::Border {
-                radius: 20.0.into(),
-                width: 3.0,
-                color: IcedColor::from_rgb(0.6, 0.4, 0.2),
-            },
+            background: Some(iced::Background::Color(IcedColor::from_rgb(0.1, 0.3, 0.2))),
             ..Default::default()
-        });
-
-        container(rules_card)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x()
-            .center_y()
-            .padding(40)
-            .style(|_: &Theme| container::Appearance {
-                background: Some(iced::Background::Color(IcedColor::from_rgb(0.1, 0.3, 0.2))),
-                ..Default::default()
-            })
-            .into()
+        })
+        .into()
     }
 
     fn render_game_over(&self, winner: GameColor) -> Element<'_, Message> {
-        let confetti_canvas = canvas(ConfettiView {
-            confetti: &self.confetti,
-        })
-        .width(Length::Fill)
-        .height(Length::Fill);
         let (color_name, glow_color) = match winner {
             GameColor::Red => ("TEAM ROT", IcedColor::from_rgb(1.0, 0.3, 0.3)),
             GameColor::Green => ("TEAM GRÜN", IcedColor::from_rgb(0.3, 1.0, 0.3)),
@@ -834,56 +812,61 @@ impl DogApp {
             GameColor::Purple => ("TEAM LILA", IcedColor::from_rgb(0.8, 0.3, 1.0)),
             GameColor::Orange => ("TEAM ORANGE", IcedColor::from_rgb(1.0, 0.6, 0.2)),
         };
-
-        let overlay_card = container(
-            column![
-                text("HERZLICHEN GLÜCKWUNSCH!")
-                    .size(40)
-                    .style(IcedColor::WHITE)
-                    .horizontal_alignment(iced::alignment::Horizontal::Center),
-                iced::widget::Space::with_height(Length::Fixed(20.0)),
-                text(format!("{} HAT GEWONNEN!", color_name))
-                    .size(70)
-                    .style(glow_color)
-                    .horizontal_alignment(iced::alignment::Horizontal::Center),
-                iced::widget::Space::with_height(Length::Fixed(60.0)),
-                button(
-                    text("Zurück zum Hauptmenü")
-                        .size(24)
-                        .horizontal_alignment(iced::alignment::Horizontal::Center)
-                )
-                .padding([15, 50])
-                .style(iced::theme::Button::Primary)
-                .on_press(Message::BackToStart)
-            ]
-            .align_items(iced::Alignment::Center),
-        )
-        .padding(60)
-        .style(move |_: &Theme| container::Appearance {
-            background: Some(iced::Background::Color(IcedColor::from_rgba(
-                0.0, 0.0, 0.0, 0.85,
-            ))),
-            border: iced::Border {
-                radius: 20.0.into(),
-                width: 4.0,
-                color: glow_color,
-            },
-            ..Default::default()
-        });
-
         container(
             row![
-                container(confetti_canvas)
+                container(
+                    canvas(ConfettiView {
+                        confetti: &self.confetti
+                    })
                     .width(Length::Fill)
                     .height(Length::Fill)
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
             ]
             .push(
                 container(
-                    container(overlay_card)
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .center_x()
-                        .center_y(),
+                    container(
+                        container(
+                            column![
+                                text("HERZLICHEN GLÜCKWUNSCH!")
+                                    .size(40)
+                                    .style(IcedColor::WHITE)
+                                    .horizontal_alignment(iced::alignment::Horizontal::Center),
+                                iced::widget::Space::with_height(Length::Fixed(20.0)),
+                                text(format!("{} HAT GEWONNEN!", color_name))
+                                    .size(70)
+                                    .style(glow_color)
+                                    .horizontal_alignment(iced::alignment::Horizontal::Center),
+                                iced::widget::Space::with_height(Length::Fixed(60.0)),
+                                button(
+                                    text("Zurück zum Hauptmenü")
+                                        .size(24)
+                                        .horizontal_alignment(iced::alignment::Horizontal::Center)
+                                )
+                                .padding([15, 50])
+                                .style(iced::theme::Button::Primary)
+                                .on_press(Message::BackToStart)
+                            ]
+                            .align_items(iced::Alignment::Center),
+                        )
+                        .padding(60)
+                        .style(move |_: &Theme| container::Appearance {
+                            background: Some(iced::Background::Color(IcedColor::from_rgba(
+                                0.0, 0.0, 0.0, 0.85,
+                            ))),
+                            border: iced::Border {
+                                radius: 20.0.into(),
+                                width: 4.0,
+                                color: glow_color,
+                            },
+                            ..Default::default()
+                        }),
+                    )
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .center_x()
+                    .center_y(),
                 )
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -911,10 +894,14 @@ impl DogApp {
 
         let ui_scale = (self.window_size.width / 1024.0).max(0.7);
         let sidebar_width = 320.0 * ui_scale;
+
+        let my_idx = self.local_player_index.unwrap_or(game.current_player_index);
+
         let board = canvas(BoardView {
             game,
-            highlights: self.get_possible_moves(),
+            highlights: self.get_possible_moves(my_idx),
             animation: self.animation.clone(),
+            my_idx,
         })
         .width(Length::Fill)
         .height(Length::Fill);
@@ -924,7 +911,7 @@ impl DogApp {
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .style(iced::theme::Container::Transparent),
-            container(self.make_sidebar(game, ui_scale))
+            container(self.make_sidebar(game, ui_scale, my_idx))
                 .width(Length::Fixed(sidebar_width))
                 .padding(20.0 * ui_scale)
                 .style(|_: &Theme| container::Appearance {
@@ -939,10 +926,10 @@ impl DogApp {
         .height(Length::Fill);
 
         container(column![
-            self.build_grab_bar(ui_scale)
+            self.build_grab_bar(ui_scale, my_idx)
                 .unwrap_or_else(|| container(text("")).padding(0).into()),
             main_area,
-            container(self.make_hand_view(game))
+            container(self.make_hand_view(game, my_idx))
                 .padding(0)
                 .height(Length::Fixed(180.0))
         ])
@@ -955,7 +942,7 @@ impl DogApp {
         .into()
     }
 
-    fn build_grab_bar(&self, scale: f32) -> Option<Element<'_, Message>> {
+    fn build_grab_bar(&self, scale: f32, _my_idx: usize) -> Option<Element<'_, Message>> {
         if let Some(pending) = &self.pending_action {
             match pending {
                 PendingAction::Grab => {
@@ -963,7 +950,7 @@ impl DogApp {
                         let mut row_buttons = row![].spacing(5.0 * scale);
                         for (idx, player) in self.game.as_ref().unwrap().players.iter().enumerate()
                         {
-                            if idx == self.game.as_ref().unwrap().current_player_index {
+                            if idx == _my_idx {
                                 continue;
                             }
                             row_buttons = row_buttons.push(
@@ -1010,11 +997,12 @@ impl DogApp {
         }
     }
 
-    fn make_hand_view<'a>(&self, game: &'a Game) -> Element<'a, Message> {
+    fn make_hand_view<'a>(&self, game: &'a Game, my_idx: usize) -> Element<'a, Message> {
         container(
             canvas(HandView {
                 game,
                 selected_card: self.selected_card,
+                my_idx,
             })
             .width(Length::Fill)
             .height(Length::Fill),
@@ -1044,7 +1032,6 @@ impl DogApp {
         } else {
             column![text("GAME: none").size(font_size)].spacing(4.0 * scale)
         };
-
         column![
             text("DEBUG").size(16.0 * scale).style(IcedColor::WHITE),
             text(format!("sel_card: {:?}", self.selected_card))
@@ -1062,19 +1049,15 @@ impl DogApp {
         .into()
     }
 
-    fn make_sidebar(&self, game: &Game, scale: f32) -> Element<'_, Message> {
+    fn make_sidebar(&self, game: &Game, scale: f32, my_idx: usize) -> Element<'_, Message> {
         let font_std = 16.0 * scale;
         let info = column![
             text(format!("Runde: {}", game.round))
                 .size(font_std)
                 .style(IcedColor::WHITE),
-            text(format!(
-                "Am Zug: {:?} (P{})",
-                game.current_player().color,
-                game.current_player_index
-            ))
-            .size(font_std)
-            .style(IcedColor::WHITE),
+            text(format!("Du bist: {:?}", game.players[my_idx].color))
+                .size(font_std)
+                .style(IcedColor::WHITE),
             text(&self.msg)
                 .size(14.0 * scale)
                 .style(IcedColor::from_rgb(0.9, 0.9, 0.9)),
@@ -1083,101 +1066,113 @@ impl DogApp {
 
         let mut btns = column![].spacing(8.0 * scale);
 
-        if !game.trading_phase {
-            if let Some(rest) = game.split_rest {
-                btns = btns.push(
-                    text(format!("Split: {} Schritte übrig!", rest))
-                        .size(18.0 * scale)
-                        .style(IcedColor::from_rgb(1.0, 0.8, 0.2)),
-                );
-                btns = btns.push(
-                    button(text("Weiter aufteilen (Move)").size(font_std))
-                        .on_press(Message::GameActionBtn(GameAction::Move))
-                        .width(Length::Fill),
-                );
-            } else {
-                let can_do_anything = game.check_if_any_action_possible();
-                if !can_do_anything {
+        // FIX: Schalte alle Buttons aus, wenn wir nicht am Zug sind!
+        let is_my_turn = my_idx == game.current_player_index;
+
+        if !is_my_turn {
+            btns = btns.push(
+                text("Warte auf anderen Spieler...")
+                    .size(18.0 * scale)
+                    .style(IcedColor::from_rgb(1.0, 0.8, 0.2)),
+            );
+        } else {
+            if !game.trading_phase {
+                if let Some(rest) = game.split_rest {
                     btns = btns.push(
-                        text("Kein gültiger Zug möglich!")
-                            .size(16.0 * scale)
-                            .style(IcedColor::from_rgb(1.0, 0.5, 0.5)),
+                        text(format!("Split: {} Schritte übrig!", rest))
+                            .size(18.0 * scale)
+                            .style(IcedColor::from_rgb(1.0, 0.8, 0.2)),
                     );
                     btns = btns.push(
-                        button(text("Abwerfen (Remove)").size(font_std))
-                            .on_press(Message::GameActionBtn(GameAction::Remove))
+                        button(text("Weiter aufteilen (Move)").size(font_std))
+                            .on_press(Message::GameActionBtn(GameAction::Move))
                             .width(Length::Fill),
                     );
                 } else {
-                    if let Some(card) = self.selected_card {
-                        let is_place_card = matches!(card, Card::Ace | Card::King | Card::Joker);
-                        let is_move_card = !card.possible_distances().is_empty()
-                            || matches!(card, Card::Seven | Card::Joker);
-                        let is_jack = matches!(card, Card::Jack);
-                        let is_interchange_card = matches!(card, Card::Jack | Card::Joker);
-                        let is_grab_card = matches!(card, Card::Two);
-                        let is_ffa =
-                            matches!(self.selected_variant, Some(GameVariantKind::FreeForAll));
-
-                        if is_move_card && !is_jack {
-                            btns = btns.push(
-                                button(text("Ziehen / Split (Move)").size(font_std))
-                                    .on_press(Message::GameActionBtn(GameAction::Move))
-                                    .width(Length::Fill),
-                            );
-                        }
-                        if is_place_card {
-                            btns = btns.push(
-                                button(text("Legen (Place)").size(font_std))
-                                    .on_press(Message::GameActionBtn(GameAction::Place))
-                                    .width(Length::Fill),
-                            );
-                        }
-                        if is_interchange_card {
-                            btns = btns.push(
-                                button(text("Tauschen (Interchange)").size(font_std))
-                                    .on_press(Message::GameActionBtn(GameAction::Interchange))
-                                    .width(Length::Fill),
-                            );
-                        }
-                        if is_grab_card && is_ffa {
-                            btns = btns.push(
-                                button(text("Klauen (Grab)").size(font_std))
-                                    .on_press(Message::GameActionBtn(GameAction::Grab))
-                                    .width(Length::Fill),
-                            );
-                        }
-                    } else {
+                    let can_do_anything = game.check_if_any_action_possible();
+                    if !can_do_anything {
                         btns = btns.push(
-                            text("Wähle eine Karte aus, um mögliche Aktionen zu sehen.")
-                                .size(14.0 * scale)
-                                .style(IcedColor::from_rgb(0.7, 0.7, 0.7)),
+                            text("Kein gültiger Zug möglich!")
+                                .size(16.0 * scale)
+                                .style(IcedColor::from_rgb(1.0, 0.5, 0.5)),
                         );
+                        btns = btns.push(
+                            button(text("Abwerfen (Remove)").size(font_std))
+                                .on_press(Message::GameActionBtn(GameAction::Remove))
+                                .width(Length::Fill),
+                        );
+                    } else {
+                        if let Some(card) = self.selected_card {
+                            let is_place_card =
+                                matches!(card, Card::Ace | Card::King | Card::Joker);
+                            let is_move_card = !card.possible_distances().is_empty()
+                                || matches!(card, Card::Seven | Card::Joker);
+                            let is_jack = matches!(card, Card::Jack);
+                            let is_interchange_card = matches!(card, Card::Jack | Card::Joker);
+                            let is_grab_card = matches!(card, Card::Two);
+                            let is_ffa =
+                                matches!(self.selected_variant, Some(GameVariantKind::FreeForAll));
+
+                            if is_move_card && !is_jack {
+                                btns = btns.push(
+                                    button(text("Ziehen / Split (Move)").size(font_std))
+                                        .on_press(Message::GameActionBtn(GameAction::Move))
+                                        .width(Length::Fill),
+                                );
+                            }
+                            if is_place_card {
+                                btns = btns.push(
+                                    button(text("Legen (Place)").size(font_std))
+                                        .on_press(Message::GameActionBtn(GameAction::Place))
+                                        .width(Length::Fill),
+                                );
+                            }
+                            if is_interchange_card {
+                                btns = btns.push(
+                                    button(text("Tauschen (Interchange)").size(font_std))
+                                        .on_press(Message::GameActionBtn(GameAction::Interchange))
+                                        .width(Length::Fill),
+                                );
+                            }
+                            if is_grab_card && is_ffa {
+                                btns = btns.push(
+                                    button(text("Klauen (Grab)").size(font_std))
+                                        .on_press(Message::GameActionBtn(GameAction::Grab))
+                                        .width(Length::Fill),
+                                );
+                            }
+                        } else {
+                            btns = btns.push(
+                                text("Wähle eine Karte aus, um mögliche Aktionen zu sehen.")
+                                    .size(14.0 * scale)
+                                    .style(IcedColor::from_rgb(0.7, 0.7, 0.7)),
+                            );
+                        }
                     }
                 }
-            }
-        } else {
-            if matches!(self.selected_variant, Some(GameVariantKind::FreeForAll)) {
-                btns = btns.push(
-                    button(text("Tausch-Klau (TradeGrab)").size(font_std))
-                        .on_press(Message::GameActionBtn(GameAction::TradeGrab))
-                        .width(Length::Fill),
-                );
             } else {
+                if matches!(self.selected_variant, Some(GameVariantKind::FreeForAll)) {
+                    btns = btns.push(
+                        button(text("Tausch-Klau (TradeGrab)").size(font_std))
+                            .on_press(Message::GameActionBtn(GameAction::TradeGrab))
+                            .width(Length::Fill),
+                    );
+                } else {
+                    btns = btns.push(
+                        button(text("Handel (Trade)").size(font_std))
+                            .on_press(Message::GameActionBtn(GameAction::Trade))
+                            .width(Length::Fill),
+                    );
+                }
+            }
+
+            if self.pending_action.is_some() {
                 btns = btns.push(
-                    button(text("Handel (Trade)").size(font_std))
-                        .on_press(Message::GameActionBtn(GameAction::Trade))
-                        .width(Length::Fill),
+                    button(text("Abbrechen").size(font_std))
+                        .style(iced::theme::Button::Destructive)
+                        .on_press(Message::CancelPendingAction),
                 );
             }
-        }
-
-        if self.pending_action.is_some() {
-            btns = btns.push(
-                button(text("Abbrechen").size(font_std))
-                    .style(iced::theme::Button::Destructive)
-                    .on_press(Message::CancelPendingAction),
-            );
         }
 
         column![
@@ -1207,11 +1202,15 @@ impl DogApp {
             return Command::none();
         }
         let card = self.selected_card.unwrap();
-        let (current_color, current_idx) = if let Some(g) = &self.game {
-            (g.current_player().color, g.current_player_index)
-        } else {
+        let game = self.game.as_ref().unwrap();
+
+        let my_idx = self.local_player_index.unwrap_or(game.current_player_index);
+        if my_idx != game.current_player_index {
+            self.msg = "Es ist nicht dein Zug!".into();
             return Command::none();
-        };
+        }
+
+        let current_color = game.players[my_idx].color;
 
         match action_type {
             GameAction::Grab => {
@@ -1221,11 +1220,10 @@ impl DogApp {
                 self.msg = "Wähle einen Gegner zum Klauen.".into();
             }
             GameAction::TradeGrab => {
-                let game = self.game.as_ref().unwrap();
-                let prev_idx = if game.current_player_index == 0 {
+                let prev_idx = if my_idx == 0 {
                     game.players.len() - 1
                 } else {
-                    game.current_player_index - 1
+                    my_idx - 1
                 };
                 self.pending_action = Some(PendingAction::TradeGrab);
                 self.selected_opponent = Some(prev_idx);
@@ -1248,7 +1246,7 @@ impl DogApp {
                     player: current_color,
                     card: Some(card),
                     action: ActionKind::Place {
-                        target_player: current_idx,
+                        target_player: my_idx,
                     },
                 };
                 return self.do_action(card, act);
@@ -1279,11 +1277,14 @@ impl DogApp {
             return Command::none();
         }
         let card = self.selected_card.unwrap();
-        let current_color = if let Some(g) = &self.game {
-            g.current_player().color
-        } else {
+
+        let game = self.game.as_ref().unwrap();
+        let my_idx = self.local_player_index.unwrap_or(game.current_player_index);
+        if my_idx != game.current_player_index {
+            self.msg = "Es ist nicht dein Zug!".into();
             return Command::none();
-        };
+        }
+        let current_color = game.players[my_idx].color;
 
         if let Some(pending) = self.pending_action.clone() {
             match pending {
@@ -1347,7 +1348,6 @@ impl DogApp {
         let mut from_idx = 0;
         let mut to_idx = 0;
         let mut from_zwinger = None;
-
         match action.action {
             ActionKind::Move { from, to } => {
                 is_move = true;
@@ -1366,14 +1366,16 @@ impl DogApp {
             }
             _ => {}
         };
-
         if matches!(action.action, ActionKind::TradeGrab { .. }) {
             action.card = None;
         } else {
             action.card = Some(card);
         }
 
-        let current_color_enum = self.game.as_ref().unwrap().current_player().color;
+        let my_idx = self
+            .local_player_index
+            .unwrap_or(self.game.as_ref().unwrap().current_player_index);
+        let current_color_enum = self.game.as_ref().unwrap().players[my_idx].color;
 
         let anim_color_enum = match action.action {
             ActionKind::Place { target_player } => {
@@ -1401,12 +1403,10 @@ impl DogApp {
         if let Some(client) = &self.client {
             let client = Arc::clone(client);
             let play_str = action.to_string();
-
             self.selected_card = None;
             self.pending_action = None;
             self.selected_opponent = None;
             self.selected_opponent_card = None;
-
             Command::perform(
                 async move {
                     client
@@ -1480,6 +1480,7 @@ struct BoardView<'a> {
     game: &'a Game,
     highlights: Vec<usize>,
     animation: Option<MoveAnimation>,
+    my_idx: usize,
 }
 fn get_tile_position(
     index: usize,
@@ -1537,10 +1538,8 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
             let total_tiles = total_players * 16 + total_players * 4;
             let ring_size = self.game.board.ring_size;
             let scale = bounds.width.min(bounds.height) / 850.0;
-            let current_p_idx = self.game.current_player_index;
-            let current_p_angle =
-                (current_p_idx as f32 * 16.0 / ring_size as f32) * std::f32::consts::TAU;
-            let rotation = std::f32::consts::FRAC_PI_2 - current_p_angle;
+            let my_angle = (self.my_idx as f32 * 16.0 / ring_size as f32) * std::f32::consts::TAU;
+            let rotation = std::f32::consts::FRAC_PI_2 - my_angle;
             for i in 0..total_tiles {
                 let pos = get_tile_position(i, total_players, center, scale, rotation);
                 if is_hit(cursor_position, pos, 12.0 * scale) {
@@ -1568,10 +1567,10 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
         let ring_size = self.game.board.ring_size;
         let total_tiles = ring_size + total_players * 4;
         let scale = bounds.width.min(bounds.height) / 850.0;
-        let current_p_idx = self.game.current_player_index;
-        let current_p_angle =
-            (current_p_idx as f32 * 16.0 / ring_size as f32) * std::f32::consts::TAU;
-        let rotation = std::f32::consts::FRAC_PI_2 - current_p_angle;
+
+        // FIX: Brett dreht sich jetzt immer passend zu deiner EIGENEN Farbe!
+        let my_angle = (self.my_idx as f32 * 16.0 / ring_size as f32) * std::f32::consts::TAU;
+        let rotation = std::f32::consts::FRAC_PI_2 - my_angle;
         let board_radius = 340.0 * scale;
         let line_width = 3.0 * scale;
 
@@ -1590,7 +1589,7 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
         );
 
         for offset in 1..total_players {
-            let opponent_idx = (current_p_idx + offset) % total_players;
+            let opponent_idx = (self.my_idx + offset) % total_players;
             let card_count = self.game.players[opponent_idx].cards.len();
             let cw = 30.0 * scale;
             let ch = 45.0 * scale;
@@ -1602,7 +1601,6 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
                 center.y + card_orbit_radius * card_angle.sin(),
             );
             let is_horizontal = card_angle.cos().abs() < 0.5;
-
             for c in 0..card_count {
                 let spread = 15.0 * scale;
                 let total_w = (card_count as f32 - 1.0) * spread;
@@ -1653,7 +1651,6 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
                 track_stroke.clone(),
             );
         }
-
         for p_idx in 0..total_players {
             let start_idx = self.game.board.start_field(p_idx);
             let house_start_idx = ring_size + p_idx * 4;
@@ -1688,7 +1685,7 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
         }
 
         let board_state = self.game.board_state();
-        let current_color_iced = match self.game.current_player().color {
+        let my_color_iced = match self.game.players[self.my_idx].color {
             GameColor::Red => IcedColor::from_rgb(0.8, 0.2, 0.2),
             GameColor::Green => IcedColor::from_rgb(0.2, 0.8, 0.2),
             GameColor::Blue => IcedColor::from_rgb(0.2, 0.2, 0.8),
@@ -1764,17 +1761,12 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
             if self.highlights.contains(&i) {
                 frame.fill(
                     &canvas::Path::circle(pos, 6.0 * scale),
-                    IcedColor::from_rgba(
-                        current_color_iced.r,
-                        current_color_iced.g,
-                        current_color_iced.b,
-                        0.4,
-                    ),
+                    IcedColor::from_rgba(my_color_iced.r, my_color_iced.g, my_color_iced.b, 0.4),
                 );
                 frame.stroke(
                     &canvas::Path::circle(pos, 11.0 * scale),
                     canvas::Stroke::default()
-                        .with_color(current_color_iced)
+                        .with_color(my_color_iced)
                         .with_width(3.0 * scale),
                 );
             }
@@ -1825,13 +1817,11 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
             } else {
                 get_tile_position(anim.from, total_players, center, scale, rotation)
             };
-
             let p2 = get_tile_position(anim.to, total_players, center, scale, rotation);
             let mut x = p1.x + (p2.x - p1.x) * anim.progress;
             let mut y = p1.y + (p2.y - p1.y) * anim.progress;
             let hop = (1.0 - (2.0 * anim.progress - 1.0).powi(2)) * 80.0 * scale;
             y -= hop;
-
             frame.fill(
                 &canvas::Path::circle(
                     Point::new(x, p1.y + (p2.y - p1.y) * anim.progress + 5.0 * scale),
@@ -1849,6 +1839,7 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
 struct HandView<'a> {
     game: &'a Game,
     selected_card: Option<Card>,
+    my_idx: usize,
 }
 impl<'a> HandView<'a> {
     fn get_layout(
@@ -1856,7 +1847,9 @@ impl<'a> HandView<'a> {
         bounds: iced::Rectangle,
         cursor_position: Point,
     ) -> Vec<(usize, Card, iced::Rectangle, bool)> {
-        let cards = &self.game.current_player().cards;
+        // FIX: Wir holen uns jetzt DEINE Handkarten, egal wer am Zug ist!
+        let cards = &self.game.players[self.my_idx].cards;
+
         let count = cards.len();
         if count == 0 {
             return Vec::new();
@@ -2009,7 +2002,6 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
     let gold = IcedColor::from_rgb(1.0, 0.8, 0.0);
     let blond = IcedColor::from_rgb(0.95, 0.85, 0.3);
     let rot = IcedColor::from_rgb(0.85, 0.1, 0.1);
-
     match card {
         Card::King => {
             let r = w * 0.26;
@@ -2154,7 +2146,6 @@ fn draw_eyes(frame: &mut canvas::Frame, center: Point, sz: f32) {
         IcedColor::BLACK,
     );
 }
-
 fn draw_marble(frame: &mut canvas::Frame, center: Point, color: IcedColor, scale: f32) {
     let radius = 10.0 * scale;
     frame.fill(
