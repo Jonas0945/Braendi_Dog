@@ -184,21 +184,14 @@ impl Game {
             .map(|i| Player {
                 player_type: player_types[i],
                 color: colors[i],
-                pieces_to_place: 3,
+                pieces_to_place: 4, // FIX 1: 4 Statt 3
                 pieces_in_house: 0,
                 cards: Vec::new(),
             })
             .collect();
 
-        let mut board = Board::new(n);
-        
-        for i in 0..n {
-            let start = board.start_field(i);
-            board.tiles[start] = Some(Piece { 
-                owner: i, 
-                left_start: false 
-            });
-        }
+        // FIX 1: Board sauber starten, nicht direkt aufs Feld setzen
+        let board = Board::new(n);
 
         Self {
             game_variant: GameVariant::FreeForAll(n),
@@ -238,7 +231,8 @@ impl Game {
         let distances = _card.possible_distances();
 
         let forward_ok = forward.map_or(false, |f| distances.contains(&f));
-        let backward_ok = backward.map_or(false, |b| distances.contains(&b));
+        // FIX 2: Rückwärts NUR mit 4 Feldern und erlaubten Karten
+        let backward_ok = backward.map_or(false, |b| _card.allows_backward_move() && b == 4);
 
         forward_ok || backward_ok
     }
@@ -392,14 +386,13 @@ impl Game {
             }
         }
 
-        // FIX: Wir holen uns direkt die Figuren, die wir WIRKLICH kontrollieren dürfen!
         let movable_pieces = self.find_movable_pieces(current_player_index);
 
         if movable_pieces.is_empty() {
             return false;
         }
 
-        // Check if split is possible (FIX: Nutzt jetzt movable_pieces)
+        // Check if split is possible
         if matches!(card, Card::Seven | Card::Joker) {
             let mut total_steps: u8 = 0;
 
@@ -493,6 +486,11 @@ impl Game {
                 continue;
             }
 
+            // FIX 3: Verhindert das direkte Einbiegen ins Haus vom Startfeld!
+            if from < self.board.ring_size && to >= self.board.ring_size && !piece.left_start {
+                continue;
+            }
+
             if let Some(path) = self.board.passed_tiles(from, to, piece.owner, backward) {
                 if self.board.is_path_free(&path) {
                     return true;
@@ -505,6 +503,11 @@ impl Game {
 
     pub fn can_piece_move_from_to(&self, from: usize, to: usize, backward: bool) -> bool {
         let piece = self.board.tiles[from].as_ref().unwrap();
+
+        // FIX 3: Verhindert das direkte Einbiegen ins Haus!
+        if from < self.board.ring_size && to >= self.board.ring_size && !piece.left_start {
+            return false;
+        }
 
         let distance = if backward {
             self.board.distance_between(to, from, piece.owner)
@@ -613,6 +616,11 @@ impl Game {
             return Err("Cannot move this piece");
         }
 
+        // FIX 3: Harte Server-Prüfung gegen Cheater, die direkt ins Haus wollen
+        if from < self.board.ring_size && to >= self.board.ring_size && !moving_piece.left_start {
+            return Err("Eine Figur muss zuerst eine komplette Runde drehen!");
+        }
+
         let forward_distance = self.board.distance_between(from, to, moving_piece.owner);
         let backward_distance = self.board.distance_between(to, from, moving_piece.owner);
 
@@ -620,9 +628,8 @@ impl Game {
             return Err("Move not allowed with this card");
         }
 
-        let is_backward = 
-            matches!(_action.card, Some(Card::Four | Card::Joker)) 
-            && backward_distance == Some(4);
+        // FIX 2: Exakte Rückwärts-Berechnung
+        let is_backward = _action.card.map_or(false, |c| c.allows_backward_move()) && backward_distance == Some(4);
 
         let path = self.board
             .passed_tiles(from, to, moving_piece.owner, is_backward)
@@ -722,6 +729,11 @@ impl Game {
             return Err("Cannot interchange with protected piece");
         }
 
+        // FIX 4: Verhindere das Tauschen von zwei eigenen Figuren
+        if a_piece.owner == b_piece.owner {
+            return Err("Du kannst nicht zwei Figuren vom selben Spieler tauschen!");
+        }
+
         self.board.tiles[a] = Some(b_piece);
         self.board.tiles[b] = Some(a_piece);
 
@@ -767,6 +779,11 @@ impl Game {
 
         if !self.trading_phase {
             return Err("Cannot trade cards outside trading phase");
+        }
+
+        // FIX 5: Verhindere Doppel-Tausch!
+        if self.trade_buffer.iter().any(|(from, _, _)| *from == player_index) {
+            return Err("Du hast bereits eine Karte zum Tauschen ausgewählt!");
         }
 
         let trade_buffer_before = self.trade_buffer.clone();
@@ -844,6 +861,11 @@ impl Game {
             return Err("Cannot trade grab cards outside trading phase");
         }
 
+        // FIX 5: Verhindere Doppel-Tausch!
+        if self.trade_buffer.iter().any(|(from, _, _)| *from == player_index) {
+            return Err("Du hast bereits eine Karte zum Tauschen ausgewählt!");
+        }
+
         let previous_player = if player_index == 0 {
                 self.players.len() - 1
             } else {
@@ -918,6 +940,11 @@ impl Game {
 
         if !self.can_control_piece(current_player_index, moving_piece.owner) {
             return Err("Cannot split-move a piece you do not control yet (get your pieces home first!).");
+        }
+
+        // FIX 3: Harte Server-Prüfung gegen Cheater, die beim Split direkt ins Haus wollen
+        if from < self.board.ring_size && to >= self.board.ring_size && !moving_piece.left_start {
+            return Err("Eine Figur muss zuerst eine komplette Runde drehen!");
         }
 
         let mut remaining_steps = self.split_rest.unwrap_or(7);
