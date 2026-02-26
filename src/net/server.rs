@@ -5,7 +5,9 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use crate::{BeginGameMesage, Game, DogGame, game::player::Player};
+use crate::{BeginGameMesage, Game, DogGame, game::player::{Player, PlayerType}};
+use crate::ai::generator::generate_all_legal_actions;
+use crate::ai::bot::{RandomBot, EvalBot, Bot};
 use tokio::net::tcp::OwnedWriteHalf;
 
 type ClientID = usize;
@@ -85,9 +87,10 @@ impl GameServer {
                                     BeginGameMesage::ErstelleSpiel {
                                         variant,
                                         player_name,
+                                        player_types,
                                     } => {
                                         if game_guard.is_none() {
-                                            let mut new_game = Game::new(variant);
+                                            let mut new_game = Game::new(variant, player_types);
                                             new_game.new_round();
                                             *game_guard = Some(new_game);
 
@@ -264,6 +267,54 @@ impl GameServer {
                     }
                 }
 
+                // Bot turn handling: if current player is a bot, choose and play an action
+                let mut sleep_after = false;
+                {
+                    let mut game_guard = game_loop_game_ref.lock().unwrap();
+                    if let Some(game) = game_guard.as_mut() {
+                        let current_idx = game.current_player_index;
+                        let player_type = game.players[current_idx].player_type;
+
+                        match player_type {
+                            PlayerType::Human => {}
+                            PlayerType::RandomBot => {
+                                let actions_vec = generate_all_legal_actions(&game);
+                                if actions_vec.is_empty() {
+                                    game.next_player();
+                                    state_changed = true;
+                                } else {
+                                    let mut bot = RandomBot::new();
+                                    if let Some(chosen) = bot.choose_action(game, actions_vec) {
+                                        let play_str = chosen.to_string();
+                                        match game.play(&play_str) {
+                                            Ok(()) => state_changed = true,
+                                            Err(e) => println!("Bot play error: {}", e),
+                                        }
+                                    }
+                                }
+                                sleep_after = true;
+                            }
+                            PlayerType::EvalBot => {
+                                let actions_vec = generate_all_legal_actions(&game);
+                                if actions_vec.is_empty() {
+                                    game.next_player();
+                                    state_changed = true;
+                                } else {
+                                    let mut bot = EvalBot::new();
+                                    if let Some(chosen) = bot.choose_action(game, actions_vec) {
+                                        let play_str = chosen.to_string();
+                                        match game.play(&play_str) {
+                                            Ok(()) => state_changed = true,
+                                            Err(e) => println!("EvalBot play error: {}", e),
+                                        }
+                                    }
+                                }
+                                sleep_after = true;
+                            }
+                        }
+                    }
+                }
+
                 let mut clients_guard = game_loop_clients_ref.lock().await;
 
                 if state_changed {
@@ -283,6 +334,9 @@ impl GameServer {
                     if let Some(writer) = clients_guard.get_mut(&clientid) {
                         let _ = writer.write_all(message.as_bytes()).await;
                     }
+                }
+                if sleep_after {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                 }
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             }

@@ -407,6 +407,7 @@ pub fn collect_interchange_actions(game: &Game) -> Vec<Action> {
 mod tests {
     use super::*;
     use crate::game::piece::Piece;
+    use crate::game::player::PlayerType;
 
     mod collect_place_tests {
         use crate::Piece;
@@ -415,7 +416,7 @@ mod tests {
 
         #[test]
         fn own_place_free_field() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Ace];
@@ -429,7 +430,7 @@ mod tests {
 
         #[test]
         fn own_place_blocked_field() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Ace];
@@ -445,7 +446,7 @@ mod tests {
 
         #[test]
         fn own_place_multiple_cards() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Ace, Card::Joker];
@@ -462,7 +463,7 @@ mod tests {
 
         #[test]
         fn own_place_no_card() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Two];
@@ -474,7 +475,7 @@ mod tests {
 
         #[test]
         fn own_place_no_pieces_to_place() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = false;
 
             game.players[0].pieces_to_place = 0;
@@ -490,7 +491,7 @@ mod tests {
 
         #[test]
         fn team_place_free_field() {
-            let mut game = Game::new(GameVariant::ThreeVsThree);
+            let mut game = Game::new(GameVariant::ThreeVsThree, vec![PlayerType::Human; 6]);
             game.trading_phase = false;
 
             game.players[0].pieces_to_place = 0;
@@ -517,7 +518,7 @@ mod tests {
 
         #[test]
         fn team_place_no_cards() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = false;
 
             game.players[0].pieces_to_place = 0;
@@ -531,7 +532,7 @@ mod tests {
 
         #[test]
         fn team_place_multiple_cards() {
-            let mut game = Game::new(GameVariant::ThreeVsThree);
+            let mut game = Game::new(GameVariant::ThreeVsThree, vec![PlayerType::Human; 6]);
             game.trading_phase = false;
 
             game.players[0].pieces_to_place = 0;
@@ -545,7 +546,7 @@ mod tests {
 
         #[test]
         fn team_place_all_fields_blocked() {
-            let mut game = Game::new(GameVariant::ThreeVsThree);
+            let mut game = Game::new(GameVariant::ThreeVsThree, vec![PlayerType::Human; 6]);
             game.trading_phase = false;
 
             game.players[0].pieces_to_place = 0;
@@ -569,7 +570,7 @@ mod tests {
 
         #[test]
         fn team_place_one_field_blocked() {
-            let mut game = Game::new(GameVariant::ThreeVsThree);
+            let mut game = Game::new(GameVariant::ThreeVsThree, vec![PlayerType::Human; 6]);
             game.trading_phase = false;
 
             game.players[0].pieces_to_place = 0;
@@ -592,7 +593,7 @@ mod tests {
 
         #[test]
         fn ffa_single_opponent_single_card() {
-            let mut game = Game::new(GameVariant::FreeForAll(4));
+            let mut game = Game::new(GameVariant::FreeForAll(4), vec![PlayerType::Human; 4]);
             game.trading_phase = true;
 
             game.players[3].cards = vec![Card::Ace];
@@ -611,7 +612,7 @@ mod tests {
 
         #[test]
         fn ffa_multiple_opponents_multiple_cards() {
-            let mut game = Game::new(GameVariant::FreeForAll(3));
+            let mut game = Game::new(GameVariant::FreeForAll(3), vec![PlayerType::Human; 3]);
             game.trading_phase = true;
 
             game.players[1].cards = vec![Card::Ace, Card::Two];
@@ -642,7 +643,7 @@ mod tests {
 
         #[test]
         fn team_normal_single_card() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = true;
 
             game.players[0].cards = vec![Card::Ace];
@@ -663,7 +664,7 @@ mod tests {
 
         #[test]
         fn team_normal_multiple_cards() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = true;
 
             game.players[0].cards = vec![Card::Ace, Card::Joker];
@@ -684,7 +685,7 @@ mod tests {
 
         #[test]
         fn team_normal_no_cards() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = true;
 
             game.players[0].cards = vec![];
@@ -699,7 +700,7 @@ mod tests {
 
         #[test]
         fn ffa_two_pieces_move_only_ring() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Seven];
@@ -711,7 +712,7 @@ mod tests {
 
         #[test]
         fn ffa_two_piece_move_left_start_different() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Seven];
@@ -724,7 +725,7 @@ mod tests {
 
         #[test]
         fn ffa_two_pieces_move_with_split_rest() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
             game.split_rest = Some(4);
 
@@ -737,7 +738,7 @@ mod tests {
 
         #[test]
         fn ffa_two_pieces_move_with_split_rest_and_blocking_piece() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
             game.split_rest = Some(4);
 
@@ -751,7 +752,7 @@ mod tests {
 
         #[test]
         fn ffa_three_pieces_move_with_split_rest() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
             game.split_rest = Some(4);
 
@@ -765,7 +766,7 @@ mod tests {
 
         #[test]
         fn no_split_without_seven_card() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Ace];
@@ -777,7 +778,7 @@ mod tests {
 
         #[test]
         fn multiple_sevens_duplicate_actions() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
             game.players[0].cards = vec![Card::Seven, Card::Seven];
 
@@ -788,7 +789,7 @@ mod tests {
 
         #[test]
         fn all_actions_are_valid_splits() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
             let actions = collect_split_actions(&game);
 
@@ -806,7 +807,7 @@ mod tests {
 
         #[test]
         fn team_mode_does_not_move_enemy_pieces() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Seven];
@@ -838,7 +839,7 @@ mod tests {
 
         #[test]
         fn split_rest_zero_produces_no_actions() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Seven];
@@ -851,7 +852,7 @@ mod tests {
 
         #[test]
         fn fully_blocked_piece_has_no_split_actions() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Seven];
@@ -877,7 +878,7 @@ mod tests {
 
         #[test]
         fn no_grab_without_two_card() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Ace];
@@ -889,7 +890,7 @@ mod tests {
 
         #[test]
         fn grab_single_card_from_single_opponent() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Two];
@@ -915,7 +916,7 @@ mod tests {
 
         #[test]
         fn grab_multiple_cards_from_one_opponent() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Two];
@@ -938,7 +939,7 @@ mod tests {
 
         #[test]
         fn grab_from_multiple_opponents() {
-            let mut game = Game::new(GameVariant::FreeForAll(3));
+            let mut game = Game::new(GameVariant::FreeForAll(3), vec![PlayerType::Human; 3]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Two];
@@ -964,7 +965,7 @@ mod tests {
 
         #[test]
         fn multiple_twos_duplicate_grab_actions() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Two, Card::Two];
@@ -978,7 +979,7 @@ mod tests {
 
         #[test]
         fn grab_never_targets_self() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
 
             game.players[0].cards = vec![Card::Two];
             game.players[0].cards.push(Card::Ace);
@@ -998,7 +999,7 @@ mod tests {
 
         #[test]
         fn single_piece_single_move_card() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Ace];
@@ -1019,7 +1020,7 @@ mod tests {
 
         #[test]
         fn single_piece_left_start() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Ace];
@@ -1043,7 +1044,7 @@ mod tests {
 
         #[test]
         fn multiple_pieces_multiple_distances() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
             game.players[0].cards = vec![Card::Two];
             game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
@@ -1058,7 +1059,7 @@ mod tests {
 
         #[test]
         fn blocked_field_no_action() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
             game.players[0].cards = vec![Card::Ace];
             game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
@@ -1071,7 +1072,7 @@ mod tests {
 
         #[test]
         fn joker_can_move_every_distance() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
             game.players[0].cards = vec![Card::Joker];
             game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
@@ -1086,7 +1087,7 @@ mod tests {
 
         #[test]
         fn only_own_pieces_movable() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
             game.players[0].cards = vec![Card::Ace];
             game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
@@ -1102,7 +1103,7 @@ mod tests {
 
         #[test]
         fn single_piece_single_move_card() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Four];
@@ -1120,7 +1121,7 @@ mod tests {
 
         #[test]
         fn multiple_pieces_single_move() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Joker];
@@ -1136,7 +1137,7 @@ mod tests {
 
         #[test]
         fn blocked_backward_move() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Four];
@@ -1150,7 +1151,7 @@ mod tests {
 
         #[test]
         fn left_start_backward_move() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Four];
@@ -1164,7 +1165,7 @@ mod tests {
 
         #[test]
         fn single_move_multiple_cards() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Four, Card::Four];
@@ -1178,7 +1179,7 @@ mod tests {
 
         #[test]
         fn joker_backward_moves() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Joker];
@@ -1192,7 +1193,7 @@ mod tests {
 
         #[test]
         fn in_house_backward_move_not_allowed() {
-            let mut game = Game::new(GameVariant::FreeForAll(2));
+            let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Four];
@@ -1210,7 +1211,7 @@ mod tests {
 
         #[test]
         fn no_interchange_single_piece() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Jack];
@@ -1223,7 +1224,7 @@ mod tests {
 
         #[test]
         fn interchange_with_teammate_and_opponent() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Jack];
@@ -1242,7 +1243,7 @@ mod tests {
 
         #[test]
         fn no_interchange_solely_own_pieces() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Jack];
@@ -1257,7 +1258,7 @@ mod tests {
 
         #[test]
         fn no_interchange_with_blocked_piece_and_in_house_piece() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Jack];
@@ -1273,7 +1274,7 @@ mod tests {
 
         #[test]
         fn mulitple_interchanges() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Jack];
@@ -1289,7 +1290,7 @@ mod tests {
 
         #[test]
         fn no_interchange_without_own_piece() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Jack];
@@ -1303,7 +1304,7 @@ mod tests {
 
         #[test]
         fn interchange_without_own_piece_full_house() {
-            let mut game = Game::new(GameVariant::TwoVsTwo);
+            let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Jack];

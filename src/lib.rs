@@ -3,7 +3,10 @@ pub mod ai;
 pub mod game;
 pub mod net;
 pub mod ui;
+pub mod gui;
+
 pub use net::*;
+
 //pub mod bin;
 pub use game::action::{Action, ActionKind};
 pub use game::card::Card;
@@ -14,7 +17,7 @@ pub use game::piece::Piece;
 use serde::{Deserialize, Serialize};
 pub use ui::render;
 
-//Aktionen, die SPieler versuchen können
+//Aktionen, die Spieler versuchen können
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum ClientNachricht {
     beitritt,
@@ -35,6 +38,7 @@ pub enum BeginGameMesage {
     ErstelleSpiel {
         variant: GameVariant,
         player_name: String,
+        player_types: Vec<game::player::PlayerType>,
     },
 
     SpielBeitreten {

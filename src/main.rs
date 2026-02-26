@@ -1,13 +1,10 @@
-//use anyhow::Ok;
+use braendi_dog::ai::generator::generate_all_legal_actions;
+use braendi_dog::game::player::PlayerType;
 use braendi_dog::{Game, DogGame, Action, game::game::GameVariant, render};
+use braendi_dog::ai::bot::{Bot, RandomBot};
 use std::io::{self, Write};
-use std::fs::OpenOptions;
 use std::str::FromStr;
-
-// Wir binden das GUI-Modul ein (das wir gleich erstellen)
-pub mod gui;
-
-fn select_game_variant() -> GameVariant {
+/*fn select_game_variant() -> GameVariant {
     loop {
         println!("Spielvariante auswählen:");
         println!("1) 2 vs 2 (4 Spieler)");
@@ -17,119 +14,163 @@ fn select_game_variant() -> GameVariant {
         print!("Eingabe: ");
         io::stdout().flush().unwrap();
 
-        // hier könnte man die Auswahl verarbeiten
         let mut input = String::new();
         if io::stdin().read_line(&mut input).is_err() {
-            println!("Fehler beim Lesen der Eingabe.");
+            println!("Eingabefehler.");
             continue;
         }
+
         match input.trim() {
             "1" => return GameVariant::TwoVsTwo,
             "2" => return GameVariant::ThreeVsThree,
             "3" => return GameVariant::TwoVsTwoVsTwo,
             "4" => {
-                // ask how many players
-                print!("Anzahl Spieler (2-6): ");
-                io::stdout().flush().unwrap();
-                let mut cnt = String::new();
-                if io::stdin().read_line(&mut cnt).is_err() {
-                    println!("Fehler beim Lesen der Eingabe.");
-                    continue;
-                }
-                if let Ok(n) = cnt.trim().parse::<usize>() {
-                    return GameVariant::FreeForAll(n);
-                } else {
-                    println!("Ungültige Zahl, bitte erneut versuchen.");
+                loop {
+                    println!("Spieleranzahl auswählen (2-6):");
+                    print!("Eingabe: ");
+                    io::stdout().flush().unwrap();
+
+                    let mut input = String::new();
+                    if io::stdin().read_line(&mut input).is_err() {
+                        println!("Eingabefehler.");
+                        continue;
+                    }
+
+                    match input.trim() {
+                        "2" => return GameVariant::FreeForAll(2),
+                        "3" => return GameVariant::FreeForAll(3),
+                        "4" => return GameVariant::FreeForAll(4),
+                        "5" => return GameVariant::FreeForAll(5),
+                        "6" => return GameVariant::FreeForAll(6),
+                        _ => println!("Ungültige Anzahl.\n"),
+                    }
                 }
             }
-            _ => println!("Ungültige Auswahl, bitte erneut versuchen."),
+            _ => println!("Ungültige Auswahl.\n"),
         }
     }
 }
 
-fn main() -> iced::Result {
-    // Startet die GUI aus der Datei gui.rs
-    gui::launch()
-}
+fn select_bots(num_players: usize) -> Vec<PlayerType> {
+    let mut bot_flags: Vec<PlayerType> = Vec::new();
 
-// CLI variant (not used by default)
-#[allow(dead_code)]
-fn cli_main() {
+    println!("Für jeden Spieler angeben, ob  Human (H), RandomBot (R) oder EvalBot(E):");
+
+    for i in 0..num_players {
+        loop {
+            print!("Spieler {}: ", i);
+            io::stdout().flush().unwrap();
+            let mut input = String::new();
+            io::stdin().read_line(&mut input).unwrap();
+            match input.trim().to_lowercase().as_str() {
+                "H" => {
+                    bot_flags.push(PlayerType::Human);
+                    break;
+                }
+                "R" => {
+                    bot_flags.push(PlayerType::RandomBot);
+                    break;
+                }
+                "E" => {
+                    bot_flags.push(PlayerType::EvalBot);
+                    break;
+                }
+                _ => println!("Bitte H, R oder E eingeben."),
+            }
+        }
+    }
+
+    bot_flags
+}*/
+
+fn main() {
+    braendi_dog::gui::launch();
+    /*
     let variant = select_game_variant();
     let mut game = Game::new(variant);
-    let log_file_path = "game_log.txt";
+
+    let num_players = game.players.len();
+    let bot_flags = select_bots(num_players);
+    let mut bot = RandomBot::new();
+
+    let mut last_action: Option<Action> = None;
 
     game.new_round();
 
     loop {
         render(&game);
 
-        // Read player action
-        print!("Aktion eingeben (z.B. Place, Move, Split, Trade, Remove, Undo, exit): ");
-        io::stdout().flush().unwrap();
-
-        let mut input = String::new();
-        if io::stdin().read_line(&mut input).is_err() {
-            println!("Fehler beim Lesen der Eingabe.");
-            continue;
-        }
-        let input = input.trim();
-
-        // Exit
-        if input.eq_ignore_ascii_case("exit") {
-            println!("Spiel beendet.");
-            break;
+        if let Some(last) = &last_action {
+            println!("Letzter Zug: {:?}", last);
         }
 
-        // Undo
-        if input.eq_ignore_ascii_case("undo") {
-            match game.undo_action() {
-                Ok(_) => println!("Letzte Aktion wurde zurückgenommen."),
-                Err(e) => println!("Undo fehlgeschlagen: {}", e),
+        let player_index = game.current_player_index;
+        let player_color = game.current_player().color;
+
+        let action: Action = if bot_flags[player_index] {
+            let actions = generate_all_legal_actions(&game);
+
+            if actions.is_empty() {
+                println!("Keine Aktionen verfügbar für {:?}", player_color);
+                game.next_player();
+                continue;
+            } else {
+                let chosen = bot.choose_action(&mut game, actions);
+                println!("Bot {:?} wählt: {:?}", player_color, chosen);
+                chosen.unwrap()
             }
-            continue;
-        }
+            
+        } else {
+            // Read player action
+            print!("Aktion eingeben (z.B. Place, Move, Split, Trade, Remove, Undo, exit): ");
+            io::stdout().flush().unwrap();
 
-        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_file_path) {
-            let _ = writeln!(file, "{}", input);
-        }
+            let mut input = String::new();
+            if io::stdin().read_line(&mut input).is_err() {
+                println!("Fehler beim Lesen der Eingabe.");
+                continue;
+            }
+            let input = input.trim();
 
-        match Action::from_str(input) {
-            Ok(action) => {
-                match game.action(action.card, action) {
-                    Ok(_) => {
-                        println!("Zug erfolgreich!");
-                    }
-                    Err(e) => {
-                        println!("Regelverstoß: {}", e);
-                        println!("Drücke Enter zum Fortfahren...");
-                        let _ = io::stdin().read_line(&mut String::new());
-                    }
+            // Exit
+            if input.eq_ignore_ascii_case("exit") {
+                println!("Spiel beendet.");
+                break;
+            }
+
+            // Undo
+            if input.eq_ignore_ascii_case("undo") {
+                match game.undo_action() {
+                    Ok(_) => println!("Letzte Aktion wurde zurückgenommen."),
+                    Err(e) => println!("Undo fehlgeschlagen: {}", e),
+                }
+                continue;
+            }
+
+            match Action::from_str(input) {
+                Ok(a) => a,
+                Err(e) => {
+                    println!("Fehler beim Parsen: {}", e);
+                    continue;
                 }
             }
+            
+        };
+
+        match game.action(action.card, action) {
+            Ok(_) => {
+                println!("Zug erfolgreich!");
+                last_action = Some(action);
+            },
             Err(e) => {
-                println!("Fehler beim Parsen: {}", e);
-                println!("Drücke Enter zum Fortfahren...");
+                println!("Regelverstoß: {}", e);
                 let _ = io::stdin().read_line(&mut String::new());
             }
         }
 
-        // 5. Prüfen auf Sieg
         if game.is_winner() {
             println!("Spieler {:?} gewinnt!", game.current_player().color);
             break;
         }
-    }
+    }*/
 }
-
-/*
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>>{
-
-    tokio::spawn(async {
-    net::server::start_server("0.0.0.0:8080").await;}
-);
-    net::client::starte_client("127.0.0.1:8080").await?;
-    Ok(())
-}
-*/

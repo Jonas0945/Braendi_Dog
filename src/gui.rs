@@ -1,6 +1,8 @@
+use crate as braendi_dog;
 use braendi_dog::client::{Client, join_running_game};
 use braendi_dog::server::GameServer;
-use braendi_dog::{Action, ActionKind, Card, Color as GameColor, DogGame, Game, GameVariant, ServerNachrich};
+use braendi_dog::{Action, ActionKind, Card, Color as GameColor, DogGame, Game, GameVariant, ServerNachrich, };
+use braendi_dog::game::player::PlayerType;
 use futures::SinkExt;
 use iced::widget::{
     button, canvas, column, container, pick_list, row, scrollable, text, text_input,
@@ -96,6 +98,7 @@ enum PendingAction {
 
 enum Screen {
     Start,
+    BotSetup,
     Game,
     Rules,
     GameOver { winner: GameColor },
@@ -145,6 +148,8 @@ struct DogApp {
     confetti: Vec<Confetti>,
     _audio_stream: Option<OutputStream>,
     audio_sink: Option<Sink>,
+    player_types: Vec<PlayerType>,
+    hosting: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +178,9 @@ enum Message {
     OpponentCardSelected(usize),
     OpponentCardBack,
     IncomingNetwork(braendi_dog::ServerNachrich),
+    GoToBotSetup,
+    PlayerTypeChanged(usize, PlayerType),
+    ConfirmBotSetup,
     None,
 }
 
@@ -204,6 +212,8 @@ impl Application for DogApp {
             local_player_index: None,
             _audio_stream: None,
             audio_sink: None,
+            player_types: Vec::new(),
+            hosting: false,
         };
         app.play_audio("lobby.mp3", 0.15, true);
         (app, Command::none())
@@ -307,6 +317,7 @@ impl Application for DogApp {
                 self.game = None;
                 self.client = None;
                 self.local_player_index = None;
+                self.player_types = Vec::new();
                 self.play_audio("lobby.mp3", 0.15, true);
             }
             Message::OpponentSelected(idx) => {
@@ -345,14 +356,61 @@ impl Application for DogApp {
                     self.ffa_players_input = value;
                 }
             }
-            Message::StartGame => {
+            Message::GoToBotSetup => {
                 if let Some(variant) = self.build_game_variant() {
+                    // Anzahl Spieler bestimmen
+                    let count = match variant {
+                        GameVariant::TwoVsTwo => 4,
+                        GameVariant::ThreeVsThree => 6,
+                        GameVariant::TwoVsTwoVsTwo => 6,
+                        GameVariant::FreeForAll(n) => n,
+                    };
+                    // Alle als Human vorbelegen
+                    self.player_types = vec![PlayerType::Human; count];
+                    self.hosting = false;
+                    self.screen = Screen::BotSetup;
+                }
+            }
+            Message::PlayerTypeChanged(idx, pt) => {
+                if let Some(slot) = self.player_types.get_mut(idx) {
+                    *slot = pt;
+                }
+            }
+            Message::ConfirmBotSetup => {
+                  if self.hosting {
+        // Server starten, player_types mitnehmen
+        self.msg = "Starte Server...".into();
+        let addr = self.bind_addr_input.clone();
+        return Command::perform(start_server(addr), Message::ServerStarted);
+    } else {
+        if let Some(variant) = self.build_game_variant() {
+            let mut game = Game::new(variant, self.player_types.clone());
+            game.new_round();
+            self.game = Some(game);
+            self.local_player_index = None;
+            self.screen = Screen::Game;
+        }
+    }
+                /*
+                if let Some(variant) = self.build_game_variant() {
+                    let mut game = Game::new(variant, self.player_types.clone());
+                    game.new_round();
+                    self.game = Some(game);
+                    self.local_player_index = None;
+                    self.screen = Screen::Game;
+                }*/
+            }
+            Message::StartGame => {
+                return self.update(Message::GoToBotSetup);
+                
+              /*  if let Some(variant) = self.build_game_variant() {
                     let mut game = Game::new(variant);
                     game.new_round();
                     self.game = Some(game);
                     self.local_player_index = None; // Lokales Spiel = Perspektive rotiert
+                    self.hosting = false;
                     self.screen = Screen::Game;
-                }
+                }*/
             }
             Message::CardSelected(card) => {
                 self.selected_card = Some(card);
@@ -385,10 +443,16 @@ impl Application for DogApp {
                     self.msg = "Bitte gib eine Bind-Adresse ein!".into();
                     return Command::none();
                 }
-                if self.build_game_variant().is_some() {
-                    self.msg = "Starte Server...".into();
-                    let addr = self.bind_addr_input.clone();
-                    return Command::perform(start_server(addr), Message::ServerStarted);
+                if let Some(variant) = self.build_game_variant() {
+                    let count = match variant {
+                        GameVariant::TwoVsTwo => 4,
+                        GameVariant::ThreeVsThree => 6,
+                        GameVariant::TwoVsTwoVsTwo => 6,
+                        GameVariant::FreeForAll(n) => n,
+                    };
+                    self.player_types = vec![PlayerType::Human; count];
+                    self.hosting = true;
+                    self.screen = Screen::BotSetup;
                 }
             }
             Message::ServerStarted(Ok(addr)) => {
@@ -396,9 +460,10 @@ impl Application for DogApp {
                 self.msg = format!("Server läuft unter {}", addr);
                 let name = self.player_name_input.clone();
                 let variant = self.build_game_variant().unwrap();
+                let player_types = self.player_types.clone();
                 return Command::perform(
                     async move {
-                        braendi_dog::client::create_game(&addr, name, variant)
+                        braendi_dog::client::create_game(&addr, name, variant, player_types)
                             .await
                             .map(|c| Arc::new(tokio::sync::Mutex::new(c)))
                             .map_err(|e| e.to_string())
@@ -475,6 +540,7 @@ impl Application for DogApp {
     fn view(&self) -> Element<'_, Message> {
         match self.screen {
             Screen::Start => self.render_start(),
+            Screen::BotSetup => self.render_bot_setup(),
             Screen::Game => self.render_game(),
             Screen::Rules => self.render_rules(),
             Screen::GameOver { winner } => self.render_game_over(winner),
@@ -690,13 +756,13 @@ impl DogApp {
             );
 
             if self.msg.starts_with("Server läuft") {
-    host_controls = host_controls.push(
-        text(&self.msg)
-            .size(16)
-            .style(IcedColor::from_rgb(0.3, 1.0, 0.5))
-            .horizontal_alignment(iced::alignment::Horizontal::Center)
-    );
-}
+        host_controls = host_controls.push(
+            text(&self.msg)
+                .size(16)
+                .style(IcedColor::from_rgb(0.3, 1.0, 0.5))
+                .horizontal_alignment(iced::alignment::Horizontal::Center)
+        );
+    }
 
         let join_controls = column![
             text("Oder bestehendem Spiel beitreten:")
@@ -758,6 +824,105 @@ impl DogApp {
                 background: Some(iced::Background::Color(IcedColor::from_rgba(
                     0.0, 0.0, 0.0, 0.6,
                 ))),
+                border: iced::Border {
+                    radius: 20.0.into(),
+                    width: 3.0,
+                    color: IcedColor::from_rgb(0.6, 0.4, 0.2),
+                },
+                ..Default::default()
+            }),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x()
+        .center_y()
+        .style(|_: &Theme| container::Appearance {
+            background: Some(iced::Background::Color(IcedColor::from_rgb(0.1, 0.3, 0.2))),
+            ..Default::default()
+        })
+        .into()
+    }
+    fn render_bot_setup(&self) -> Element<'_, Message> {
+        let title = text("Spieler konfigurieren")
+            .size(40)
+            .style(IcedColor::from_rgb(0.9, 0.75, 0.2))
+            .horizontal_alignment(iced::alignment::Horizontal::Center)
+            .width(Length::Fill);
+
+        let mut player_rows = column![].spacing(12);
+
+        let colors = [
+            GameColor::Red, GameColor::Green, GameColor::Blue,
+            GameColor::Yellow, GameColor::Purple, GameColor::Orange,
+        ];
+
+        for (idx, pt) in self.player_types.iter().enumerate() {
+            let color_name = format!("{:?}", colors[idx % colors.len()]);
+            let label = text(format!("Spieler {} ({}):", idx + 1, color_name))
+                .size(18)
+                .style(IcedColor::WHITE)
+                .width(Length::Fixed(200.0));
+
+            let btn_human = button(text("Mensch").size(16))
+                .padding([8, 16])
+                .style(if *pt == PlayerType::Human {
+                    iced::theme::Button::Primary
+                } else {
+                    iced::theme::Button::Secondary
+                })
+                .on_press(Message::PlayerTypeChanged(idx, PlayerType::Human));
+
+            let btn_random = button(text("Zufalls-Bot").size(16))
+                .padding([8, 16])
+                .style(if *pt == PlayerType::RandomBot {
+                    iced::theme::Button::Primary
+                } else {
+                    iced::theme::Button::Secondary
+                })
+                .on_press(Message::PlayerTypeChanged(idx, PlayerType::RandomBot));
+
+            let btn_eval = button(text("Eval-Bot").size(16))
+                .padding([8, 16])
+                .style(if *pt == PlayerType::EvalBot {
+                    iced::theme::Button::Primary
+                } else {
+                    iced::theme::Button::Secondary
+                })
+                .on_press(Message::PlayerTypeChanged(idx, PlayerType::EvalBot));
+
+            player_rows = player_rows.push(
+                row![label, btn_human, btn_random, btn_eval]
+                    .spacing(10)
+                    .align_items(iced::Alignment::Center),
+            );
+        }
+
+        let bottom_btns = row![
+            button(text("Zurück").size(18))
+                .padding([12, 30])
+                .style(iced::theme::Button::Destructive)
+                .on_press(Message::BackToStart),
+            button(text("Spiel starten!").size(18))
+                .padding([12, 30])
+                .style(iced::theme::Button::Positive)
+                .on_press(Message::ConfirmBotSetup),
+        ]
+        .spacing(20);
+
+        container(
+            container(
+                column![
+                    title,
+                    iced::widget::Space::with_height(Length::Fixed(30.0)),
+                    player_rows,
+                    iced::widget::Space::with_height(Length::Fixed(30.0)),
+                    bottom_btns,
+                ]
+                .align_items(iced::Alignment::Center),
+            )
+            .padding(50)
+            .style(|_: &Theme| container::Appearance {
+                background: Some(iced::Background::Color(IcedColor::from_rgba(0.0, 0.0, 0.0, 0.6))),
                 border: iced::Border {
                     radius: 20.0.into(),
                     width: 3.0,

@@ -1,4 +1,5 @@
-use crate::game::{Game, GameVariant};
+use crate::game::{Game, GameVariant, };
+use crate::game::player::PlayerType;
 use crate::{BeginGameMesage, ServerNachrich};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -75,6 +76,7 @@ pub async fn create_game(
     server_adresse: &str,
     player_name: String,
     variante: GameVariant,
+    player_types: Vec<PlayerType>,
 ) -> Result<Client, Box<dyn std::error::Error>> {
     let mut socket = TcpStream::connect(server_adresse).await?;
 
@@ -82,6 +84,7 @@ pub async fn create_game(
     let mut join_msg = serde_json::to_vec(&BeginGameMesage::ErstelleSpiel {
         variant: variante,
         player_name: player_name,
+        player_types: player_types,
     })
     .unwrap();
     join_msg.push(b'\n');

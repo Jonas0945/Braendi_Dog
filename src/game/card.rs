@@ -65,4 +65,8 @@ impl Card {
     pub fn is_interchange_card(&self) -> bool {
         matches!(self, Card::Jack | Card::Joker)
     }
+
+    pub fn is_move_card(&self) -> bool {
+        self.is_forward_move_card()
+    }
 }

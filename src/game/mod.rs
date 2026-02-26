@@ -1,6 +1,7 @@
 pub mod card;
 pub mod deck;
 pub mod board;
+pub mod board_view;
 pub mod game;
 pub mod action;
 pub mod color;
