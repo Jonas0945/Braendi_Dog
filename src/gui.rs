@@ -714,47 +714,81 @@ impl DogApp {
     }
 
     fn get_possible_moves(&self, my_idx: usize) -> Vec<usize> {
-        let (
-            Some(game),
-            Some(PendingAction::Move {
-                from: Some(from_idx),
-            }),
-            Some(card),
-        ) = (&self.game, &self.pending_action, self.selected_card)
-        else {
+        let Some(game) = &self.game else {
             return vec![];
         };
-        let mut distances: Vec<i8> = card
-            .possible_distances()
-            .into_iter()
-            .map(|x| x as i8)
-            .collect();
-        if matches!(card, Card::Joker | Card::Four) {
-            distances.push(-4);
-        }
-        let mut targets = Vec::new();
-        let board_len = game.board.tiles.len();
 
-        for dist in distances {
-            let backward = dist < 0;
-            let abs_dist = dist.abs() as u8;
-            if !game.can_piece_move_distance(*from_idx, abs_dist, backward) {
-                continue;
-            }
-            for to_idx in 0..board_len {
-                let ok = if backward {
-                    game.board.distance_between(to_idx, *from_idx, my_idx) == Some(abs_dist)
+        match &self.pending_action {
+            Some(PendingAction::Move { from: Some(from_idx) }) => {
+                let Some(card) = self.selected_card else { return vec![]; };
+                let mut targets = Vec::new();
+                let board_len = game.board.tiles.len();
+
+                let piece_owner = game.board.tiles[*from_idx]
+                    .as_ref()
+                    .map(|p| p.owner)
+                    .unwrap_or(my_idx);
+
+                let distances: Vec<i8> = if matches!(card, Card::Seven) {
+                    let max_steps = game.split_rest.unwrap_or(7) as i8;
+                    (1..=max_steps).collect()
                 } else {
-                    game.board.distance_between(*from_idx, to_idx, my_idx) == Some(abs_dist)
+                    let mut dists: Vec<i8> = card.possible_distances().into_iter().map(|x| x as i8).collect();
+                    if matches!(card, Card::Joker | Card::Four) {
+                        dists.push(-4); 
+                    }
+                    dists
                 };
-                if ok {
-                    targets.push(to_idx);
+
+                for dist in distances {
+                    let backward = dist < 0;
+                    let abs_dist = dist.abs() as u8;
+
+                    if !game.can_piece_move_distance(*from_idx, abs_dist, backward) {
+                        continue;
+                    }
+
+                    for to_idx in 0..board_len {
+                        if let Some(piece) = &game.board.tiles[*from_idx] {
+                            if *from_idx < game.board.ring_size && to_idx >= game.board.ring_size && !piece.left_start {
+                                continue; 
+                            }
+                        }
+
+                        let ok = if backward {
+                            game.board.distance_between(to_idx, *from_idx, piece_owner) == Some(abs_dist)
+                        } else {
+                            game.board.distance_between(*from_idx, to_idx, piece_owner) == Some(abs_dist)
+                        };
+
+                        if ok {
+                            targets.push(to_idx);
+                        }
+                    }
                 }
+                targets.sort_unstable();
+                targets.dedup();
+                targets
             }
+            
+            Some(PendingAction::Interchange { from: Some(first_idx) }) => {
+                let mut targets = Vec::new();
+                
+                let first_owner = game.board.tiles[*first_idx].as_ref().map(|p| p.owner);
+                
+                for (to_idx, tile) in game.board.tiles.iter().enumerate() {
+                    if let Some(piece) = tile {
+                        if to_idx < game.board.ring_size && piece.left_start {
+                            if Some(piece.owner) != first_owner {
+                                targets.push(to_idx);
+                            }
+                        }
+                    }
+                }
+                targets
+            }
+            _ => vec![],
         }
-        targets.sort_unstable();
-        targets.dedup();
-        targets
     }
 
     fn build_game_variant(&self) -> Option<GameVariant> {
