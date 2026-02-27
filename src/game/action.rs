@@ -38,6 +38,8 @@ pub enum ActionKind {
     TradeGrab {
         target_card: usize,
     },
+    Undo,
+    
 }
 
 impl FromStr for Action {
@@ -53,6 +55,13 @@ impl FromStr for Action {
     /// "B N G 3" - Blue grabs the 3rd card from right opponent during trading phase
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.trim().eq_ignore_ascii_case("undo") {
+            return Ok(Action {
+                player: Color::Red, // Dummy, wird später überschrieben
+                card: None,
+                action: ActionKind::Undo,
+            });
+        }
         let parts: Vec<&str> = s.split_whitespace().collect();
         if parts.len() < 3 {
             return Err("Invalid action format");
@@ -231,6 +240,7 @@ impl Display for Action {
                 target_player,
             } => format!("G {target_card} {target_player}"),
             ActionKind::TradeGrab { target_card } => format!("G {target_card}"),
+            ActionKind::Undo => format!("Undo"),
         };
 
         write!(f, "{player_str} {card_str} {action_str}")
