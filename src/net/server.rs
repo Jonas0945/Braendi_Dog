@@ -267,51 +267,109 @@ impl GameServer {
                     }
                 }
 
-                // Bot turn handling: if current player is a bot, choose and play an action
+                
                 let mut sleep_after = false;
+                let mut force_undo = false;
+                let mut force_next = false;
+
+                // 1. Checken, ob der Bot überhaupt Züge hat
                 {
                     let mut game_guard = game_loop_game_ref.lock().unwrap();
                     if let Some(game) = game_guard.as_mut() {
                         let current_idx = game.current_player_index;
-                        let player_type = game.players[current_idx].player_type;
-
-                        match player_type {
-                            PlayerType::Human => {}
-                            PlayerType::RandomBot => {
-                                let actions_vec = generate_all_legal_actions(&game);
-                                if actions_vec.is_empty() {
-                                    game.next_player();
-                                    state_changed = true;
+                        if game.players[current_idx].player_type != PlayerType::Human {
+                            let actions_vec = generate_all_legal_actions(&game);
+                            if actions_vec.is_empty() {
+                                if game.split_rest.is_some() {
+                                    println!("Bot steckt im Split fest! Führe Undo aus.");
+                                    force_undo = true;
                                 } else {
-                                    let mut bot = RandomBot::new();
-                                    if let Some(chosen) = bot.choose_action(game, actions_vec) {
-                                        let play_str = chosen.to_string();
-                                        match game.play(&play_str) {
-                                            Ok(()) => state_changed = true,
-                                            Err(e) => println!("Bot play error: {}", e),
-                                        }
-                                    }
+                                    force_next = true;
                                 }
-                                sleep_after = true;
-                            }
-                            PlayerType::EvalBot => {
-                                let actions_vec = generate_all_legal_actions(&game);
-                                if actions_vec.is_empty() {
-                                    game.next_player();
-                                    state_changed = true;
-                                } else {
-                                    let mut bot = EvalBot::new();
-                                    if let Some(chosen) = bot.choose_action(game, actions_vec) {
-                                        let play_str = chosen.to_string();
-                                        match game.play(&play_str) {
-                                            Ok(()) => state_changed = true,
-                                            Err(e) => println!("EvalBot play error: {}", e),
-                                        }
-                                    }
-                                }
-                                sleep_after = true;
                             }
                         }
+                    }
+                }
+
+                if force_undo {
+                    let mut game_guard = game_loop_game_ref.lock().unwrap();
+                    let game = game_guard.as_mut().unwrap();
+                    
+                    // Merke dir, welche Karte den Fehler verursacht hat
+                    let mut card_to_burn = None;
+                    if let Some(last_entry) = game.history.last() {
+                        card_to_burn = last_entry.action.card;
+                    }
+                    
+                    // Zug komplett zurückspulen
+                    let _ = game.undo_turn();
+                    
+                    // Straf-Abwurf: Nimm dem Bot die kaputte Karte weg, sonst spielt er sie wieder!
+                    if let Some(c) = card_to_burn {
+                        let idx = game.current_player_index;
+                        game.players[idx].remove_card(c);
+                        game.discard.push(c);
+                        println!("Bot-Loop durchbrochen: Karte {:?} abgeworfen.", c);
+                    }
+                    
+                    game.next_player();
+                    state_changed = true;
+                    sleep_after = true;
+                    
+                } else if force_next {
+                    let mut game_guard = game_loop_game_ref.lock().unwrap();
+                    let game = game_guard.as_mut().unwrap();
+                    let idx = game.current_player_index;
+                    
+                    // Bot hat gar keine Züge -> Muss eine Karte abwerfen, bevor er passt!
+                    if !game.players[idx].cards.is_empty() {
+                        let card = game.players[idx].cards.remove(0);
+                        game.discard.push(card);
+                        println!("Bot muss passen und wirft Karte ab.");
+                    }
+                    
+                    game.next_player();
+                    state_changed = true;
+                    sleep_after = true;
+                } else {
+                    // 2. Bot Zug berechnen (ohne den Server zu blockieren!)
+                    let bot_action = {
+                        let game_clone_opt = {
+                            let guard = game_loop_game_ref.lock().unwrap();
+                            guard.as_ref().map(|g| g.clone())
+                        };
+
+                        if let Some(mut game_clone) = game_clone_opt {
+                            let current_idx = game_clone.current_player_index;
+                            match game_clone.players[current_idx].player_type {
+                                PlayerType::Human => None,
+                                PlayerType::RandomBot => {
+                                    let actions = generate_all_legal_actions(&game_clone);
+                                    RandomBot::new().choose_action(&mut game_clone, actions)
+                                }
+                                PlayerType::EvalBot => {
+                                    let actions = generate_all_legal_actions(&game_clone);
+                                    tokio::task::block_in_place(|| {
+                                        EvalBot::new().choose_action(&mut game_clone, actions)
+                                    })
+                                }
+                            }
+                        } else {
+                            None
+                        }
+                    };
+
+                    // 3. Ausführen der Aktion
+                    if let Some(chosen) = bot_action {
+                        let play_str = chosen.to_string();
+                        let mut game_guard = game_loop_game_ref.lock().unwrap();
+                        if let Some(game) = game_guard.as_mut() {
+                            match game.play(&play_str) {
+                                Ok(()) => state_changed = true,
+                                Err(e) => println!("Bot play error: {}", e),
+                            }
+                        }
+                        sleep_after = true;
                     }
                 }
 
@@ -336,7 +394,7 @@ impl GameServer {
                     }
                 }
                 if sleep_after {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
                 }
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             }
