@@ -86,6 +86,9 @@ impl Bot for EvalBot {
         // Trade phase: simulate partner action for every traded card
         if game.trading_phase {
             
+            if teammate_indices.is_empty() {
+                return actions.into_iter().next();
+            }
             let partner_index = teammate_indices[0];
             let mut sim_game = game.clone();
             sim_game.trading_phase = false; // Skip trading phase in simulation
