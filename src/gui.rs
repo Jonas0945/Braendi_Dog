@@ -86,6 +86,7 @@ enum GameAction {
     Grab,
     Interchange,
     TradeGrab,
+    Undo,
 }
 
 #[derive(Debug, Clone)]
@@ -236,8 +237,25 @@ impl Application for DogApp {
             subs.push(window::frames().map(|_| Message::Tick(Instant::now())));
         }
 
-        if let Some(client_arc) = &self.client {
+if let Some(client_arc) = &self.client {
             let client_clone = Arc::clone(client_arc);
+            
+            // NEU: Ein Guard, der den Reader rettet, falls Iced den Task abbricht
+            struct ReaderGuard {
+                client: Arc<tokio::sync::Mutex<braendi_dog::client::Client>>,
+                reader: Option<tokio::net::tcp::OwnedReadHalf>,
+            }
+            impl Drop for ReaderGuard {
+                fn drop(&mut self) {
+                    if let Some(r) = self.reader.take() {
+                        let client = self.client.clone();
+                        tokio::spawn(async move {
+                            client.lock().await.reader = Some(r);
+                        });
+                    }
+                }
+            }
+
             let net_sub = iced::subscription::channel(
                 std::any::TypeId::of::<braendi_dog::ServerNachrich>(),
                 100,
@@ -246,34 +264,33 @@ impl Application for DogApp {
                         let mut guard = client_clone.lock().await;
                         guard.reader.take()
                     };
-                    if let Some(mut reader) = maybe_reader {
+                    
+                    if let Some(reader) = maybe_reader {
+                        let mut guard = ReaderGuard {
+                            client: client_clone.clone(),
+                            reader: Some(reader),
+                        };
+                        
                         use tokio::io::AsyncBufReadExt;
-                        let mut buf_reader = tokio::io::BufReader::new(&mut reader);
+                        let mut buf_reader = tokio::io::BufReader::new(guard.reader.as_mut().unwrap());
                         let mut line = String::new();
                         loop {
                             line.clear();
                             match buf_reader.read_line(&mut line).await {
-                                Ok(0) => break,
+                                Ok(0) => break, // EOF
                                 Ok(_) => {
                                     let trimmed = line.trim();
-                                    if trimmed.is_empty() {
-                                        continue;
-                                    }
-                                    if let Ok(server_msg) =
-                                        serde_json::from_str::<braendi_dog::ServerNachrich>(trimmed)
-                                    {
-                                        let _ = ui_sender
-                                            .send(Message::IncomingNetwork(server_msg))
-                                            .await;
+                                    if trimmed.is_empty() { continue; }
+                                    if let Ok(server_msg) = serde_json::from_str::<braendi_dog::ServerNachrich>(trimmed) {
+                                        let _ = ui_sender.send(Message::IncomingNetwork(server_msg)).await;
                                     }
                                 }
                                 Err(_) => break,
                             }
                         }
                     }
-                    loop {
-                        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
-                    }
+                    // Verhindert das sofortige Schließen des Channels, falls der Reader gerade woanders ist
+                    loop { tokio::time::sleep(std::time::Duration::from_secs(3600)).await; }
                 },
             );
             subs.push(net_sub);
@@ -510,10 +527,69 @@ impl Application for DogApp {
                         self.msg = format!("Verbunden! Du bist Spieler {}.", idx);
                     }
                     braendi_dog::ServerNachrich::State(new_game) => {
+                        // NEU: Animation triggern, wenn eine neue Aktion in der History ist!
+                        if let Some(old_game) = &self.game {
+                            if new_game.history.len() > old_game.history.len() {
+                                if let Some(last_entry) = new_game.history.last() {
+                                    let mut is_move = false;
+                                    let mut from_idx = 0;
+                                    let mut to_idx = 0;
+                                    let mut from_zwinger = None;
+
+                                    match last_entry.action.action {
+                                        ActionKind::Move { from, to } | ActionKind::Split { from, to } => {
+                                            is_move = true;
+                                            from_idx = from;
+                                            to_idx = to;
+                                        }
+                                        ActionKind::Place { target_player } => {
+                                            is_move = true;
+                                            to_idx = new_game.board.start_field(target_player);
+                                            from_zwinger = Some(target_player);
+                                        }
+                                        _ => {}
+                                    }
+
+                                    if is_move {
+                                        let anim_color_enum = match last_entry.action.action {
+                                            ActionKind::Place { target_player } => new_game.players[target_player].color,
+                                            ActionKind::Move { to, .. } | ActionKind::Split { to, .. } => {
+                                                if let Some(piece) = &new_game.board.tiles[to] {
+                                                    new_game.players[piece.owner].color
+                                                } else {
+                                                    last_entry.action.player
+                                                }
+                                            }
+                                            _ => last_entry.action.player,
+                                        };
+
+                                        let anim_color_iced = match anim_color_enum {
+                                            GameColor::Red => IcedColor::from_rgb(0.8, 0.2, 0.2),
+                                            GameColor::Green => IcedColor::from_rgb(0.2, 0.8, 0.2),
+                                            GameColor::Blue => IcedColor::from_rgb(0.2, 0.2, 0.8),
+                                            GameColor::Yellow => IcedColor::from_rgb(0.8, 0.8, 0.2),
+                                            GameColor::Purple => IcedColor::from_rgb(0.5, 0.0, 0.5),
+                                            GameColor::Orange => IcedColor::from_rgb(1.0, 0.65, 0.0),
+                                        };
+
+                                        self.animation = Some(MoveAnimation {
+                                            from: from_idx,
+                                            to: to_idx,
+                                            color: anim_color_iced,
+                                            progress: 0.0,
+                                            from_zwinger_of_player: from_zwinger,
+                                        });
+                                        self.last_tick = Instant::now();
+                                    }
+                                }
+                            }
+                        }
+
+                        // Spiel-Status normal übernehmen
                         self.game = Some(new_game);
+                        
                         if let Some(game) = &self.game {
-                            let my_idx =
-                                self.local_player_index.unwrap_or(game.current_player_index);
+                            let my_idx = self.local_player_index.unwrap_or(game.current_player_index);
                             if my_idx == game.current_player_index {
                                 self.msg = "Du bist am Zug!".to_string();
                             } else {
@@ -524,7 +600,14 @@ impl Application for DogApp {
                                 );
                             }
                             if game.is_winner() {
-                                self.trigger_win(game.current_player().color);
+                                let mut winner_color = game.current_player().color;
+                                for p in &game.players {
+                                    if p.pieces_in_house == 4 {
+                                        winner_color = p.color;
+                                        break;
+                                    }
+                                }
+                                self.trigger_win(winner_color);
                             }
                         }
                     }
@@ -1287,7 +1370,14 @@ impl DogApp {
                             .on_press(Message::GameActionBtn(GameAction::Move))
                             .width(Length::Fill),
                     );
-                } else {
+                    // NEU: Der Split-Abbrechen Button
+                    btns = btns.push(
+                        button(text("Split abbrechen (Undo)").size(font_std))
+                            .style(iced::theme::Button::Destructive)
+                            .on_press(Message::GameActionBtn(GameAction::Undo))
+                            .width(Length::Fill),
+                    );
+                }else {
                     let can_do_anything = game.check_if_any_action_possible();
                     if !can_do_anything {
                         btns = btns.push(
@@ -1396,22 +1486,46 @@ impl DogApp {
     }
 
     fn handle_btn_click(&mut self, action_type: GameAction) -> Command<Message> {
-        if self.selected_card.is_none() {
-            self.msg = "Erst Karte wählen!".into();
-            return Command::none();
-        }
-        let card = self.selected_card.unwrap();
         let game = self.game.as_ref().unwrap();
-
         let my_idx = self.local_player_index.unwrap_or(game.current_player_index);
+        
         if my_idx != game.current_player_index {
             self.msg = "Es ist nicht dein Zug!".into();
             return Command::none();
         }
 
+        // NEU: Sonderbehandlung für Undo (benötigt keine ausgewählte Karte!)
+        if matches!(action_type, GameAction::Undo) {
+            let play_str = "undo".to_string();
+            self.selected_card = None;
+            self.pending_action = None;
+            
+            if let Some(client) = &self.client {
+                let client = Arc::clone(client);
+                return Command::perform(
+                    async move {
+                        client.lock().await.make_play(&play_str).await.map_err(|e| e.to_string())
+                    },
+                    Message::PlayResult,
+                );
+            } else {
+                if let Some(game) = self.game.as_mut() {
+                    let _ = game.undo_turn();
+                }
+                return Command::none();
+            }
+        }
+
+        // Ab hier geht der Code weiter für Aktionen, die zwingend eine Karte erfordern
+        if self.selected_card.is_none() {
+            self.msg = "Erst Karte wählen!".into();
+            return Command::none();
+        }
+        let card = self.selected_card.unwrap();
         let current_color = game.players[my_idx].color;
 
         match action_type {
+            GameAction::Undo => unreachable!(), // Wird bereits oben abgefangen
             GameAction::Grab => {
                 self.pending_action = Some(PendingAction::Grab);
                 self.selected_opponent = None;
@@ -2197,29 +2311,30 @@ impl<'a> canvas::Program<Message> for HandView<'a> {
 fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, color: IcedColor) {
     let center = rect.center();
     let w = rect.width;
+    
+    // Erweiterte Farbpalette für mehr Details
     let haut = IcedColor::from_rgb(0.98, 0.88, 0.75);
     let gold = IcedColor::from_rgb(1.0, 0.8, 0.0);
     let blond = IcedColor::from_rgb(0.95, 0.85, 0.3);
     let rot = IcedColor::from_rgb(0.85, 0.1, 0.1);
+    let braun = IcedColor::from_rgb(0.3, 0.15, 0.05); // Für Haare
+    let blau = IcedColor::from_rgb(0.2, 0.4, 0.8);   // Für den Buben-Hut
+    let schwarz = IcedColor::BLACK;
+
     match card {
         Card::King => {
             let r = w * 0.26;
-            frame.fill(
-                &canvas::Path::new(|p| {
-                    p.arc(canvas::path::Arc {
-                        center,
-                        radius: r + 2.0,
-                        start_angle: iced::Radians(0.0),
-                        end_angle: iced::Radians(6.28),
-                    })
-                }),
-                blond,
-            );
+            // Haare / Basis
+            frame.fill(&canvas::Path::circle(center, r + 2.0), blond);
+            
+            // Gesicht
             frame.fill(&canvas::Path::circle(center, r), haut);
             frame.stroke(
                 &canvas::Path::circle(center, r),
-                canvas::Stroke::default().with_width(1.5),
+                canvas::Stroke::default().with_width(1.5).with_color(schwarz),
             );
+            
+            // Krone
             frame.fill(
                 &canvas::Path::new(|p| {
                     let wc = r * 2.2;
@@ -2234,15 +2349,33 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
                 }),
                 gold,
             );
+            
             draw_eyes(frame, center, 2.0);
+            
+            // Bart und Mund
+            frame.fill(&canvas::Path::circle(Point::new(center.x, center.y + 8.0), 5.0), blond);
+            frame.stroke(
+                &canvas::Path::new(|p| {
+                    p.move_to(Point::new(center.x - 3.0, center.y + 6.0));
+                    p.line_to(Point::new(center.x + 3.0, center.y + 6.0));
+                }),
+                canvas::Stroke::default().with_width(1.0).with_color(schwarz),
+            );
         }
         Card::Queen => {
             let r = w * 0.24;
+            
+            // Braune Haare im Hintergrund
+            frame.fill(&canvas::Path::circle(center, r + 2.0), braun);
+            
+            // Gesicht
             frame.fill(&canvas::Path::circle(center, r), haut);
             frame.stroke(
                 &canvas::Path::circle(center, r),
-                canvas::Stroke::default().with_width(1.5),
+                canvas::Stroke::default().with_width(1.5).with_color(schwarz),
             );
+            
+            // Krone
             frame.fill(
                 &canvas::Path::new(|p| {
                     p.move_to(Point::new(center.x - r * 0.8, center.y - r * 0.7));
@@ -2252,29 +2385,93 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
                 }),
                 gold,
             );
+            
             draw_eyes(frame, center, 1.8);
+            
+            // Roter Kussmund
+            frame.fill(
+                &canvas::Path::circle(Point::new(center.x, center.y + 5.0), 2.0),
+                rot,
+            );
         }
         Card::Jack => {
             let r = w * 0.23;
+            
+            // Gesicht
             frame.fill(&canvas::Path::circle(center, r), haut);
             frame.stroke(
                 &canvas::Path::circle(center, r),
-                canvas::Stroke::default().with_width(1.5),
+                canvas::Stroke::default().with_width(1.5).with_color(schwarz),
             );
+            
+            // Blauer Buben-Hut
+            frame.fill(
+                &canvas::Path::new(|p| {
+                    p.move_to(Point::new(center.x - r - 2.0, center.y - r * 0.2));
+                    p.line_to(Point::new(center.x + r + 2.0, center.y - r * 0.2));
+                    p.line_to(Point::new(center.x, center.y - r * 1.4));
+                    p.close();
+                }),
+                blau,
+            );
+            
             draw_eyes(frame, center, 2.0);
+            
+            // Freches Grinsen
+            frame.stroke(
+                &canvas::Path::new(|p| {
+                    p.move_to(Point::new(center.x - 4.0, center.y + 5.0));
+                    p.line_to(Point::new(center.x + 3.0, center.y + 4.0));
+                }),
+                canvas::Stroke::default().with_width(1.0).with_color(schwarz),
+            );
         }
         Card::Joker => {
             let r = w * 0.22;
+            
+            // Gesicht (Weiß)
             frame.fill(&canvas::Path::circle(center, r), IcedColor::WHITE);
             frame.stroke(
                 &canvas::Path::circle(center, r),
-                canvas::Stroke::default().with_width(1.5),
+                canvas::Stroke::default().with_width(1.5).with_color(schwarz),
             );
+            
+            // Roter Narrenhut
             frame.fill(
-                &canvas::Path::circle(Point::new(center.x, center.y + 2.0), 4.5),
+                &canvas::Path::new(|p| {
+                    p.move_to(Point::new(center.x - r, center.y - r * 0.2));
+                    p.line_to(Point::new(center.x - r * 1.5, center.y - r * 1.5));
+                    p.line_to(Point::new(center.x, center.y - r * 0.8));
+                    p.line_to(Point::new(center.x + r * 1.5, center.y - r * 1.5));
+                    p.line_to(Point::new(center.x + r, center.y - r * 0.2));
+                    p.close();
+                }),
                 rot,
             );
+            // Goldene Glöckchen am Hut
+            frame.fill(&canvas::Path::circle(Point::new(center.x - r * 1.5, center.y - r * 1.5), 3.0), gold);
+            frame.fill(&canvas::Path::circle(Point::new(center.x + r * 1.5, center.y - r * 1.5), 3.0), gold);
+
             draw_eyes(frame, center, 2.5);
+            
+            // Rote Clown-Nase
+            frame.fill(
+                &canvas::Path::circle(Point::new(center.x, center.y + 1.0), 3.5),
+                rot,
+            );
+            
+            // Breites rotes Joker-Lächeln
+            frame.stroke(
+                &canvas::Path::new(|p| {
+                    p.arc(canvas::path::Arc {
+                        center: Point::new(center.x, center.y + 1.0),
+                        radius: 8.0,
+                        start_angle: iced::Radians(0.5),
+                        end_angle: iced::Radians(2.64), // Etwas kleiner als PI
+                    });
+                }),
+                canvas::Stroke::default().with_width(2.0).with_color(rot),
+            );
         }
         Card::Four => {
             frame.stroke(
