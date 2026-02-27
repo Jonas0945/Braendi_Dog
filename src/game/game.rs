@@ -473,7 +473,7 @@ impl Game {
     }
 
     pub fn can_piece_move_distance(&self, from: usize, dist: u8, backward: bool) -> bool {
-        let piece = self.board.tiles[from].as_ref().unwrap();
+        let piece = self.board.tiles[from].as_ref().unwrap_();
 
         for to in 0..self.board.tiles.len() {
             let valid = if backward {
@@ -937,9 +937,9 @@ impl Game {
 
         let moving_piece = self.board.check_tile(from)
             .ok_or("Invalid move: no piece found.")?;
-
-        if !self.can_control_piece(current_player_index, moving_piece.owner) {
-            return Err("Cannot split-move a piece you do not control yet (get your pieces home first!).");
+        
+        if moving_piece.owner != current_player_index && !self.teammate_indices(current_player_index).contains(&moving_piece.owner) {
+            return Err("Cannot split-move a piece that is not yours or your teammate's.");
         }
 
         // FIX 3: Harte Server-Prüfung gegen Cheater, die beim Split direkt ins Haus wollen
