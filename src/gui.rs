@@ -1,8 +1,11 @@
 use crate as braendi_dog;
+use braendi_dog::ai::generator;
 use braendi_dog::client::{Client, join_running_game};
-use braendi_dog::server::GameServer;
-use braendi_dog::{Action, ActionKind, Card, Color as GameColor, DogGame, Game, GameVariant, ServerNachrich, };
 use braendi_dog::game::player::PlayerType;
+use braendi_dog::server::GameServer;
+use braendi_dog::{
+    Action, ActionKind, Card, Color as GameColor, DogGame, Game, GameVariant, ServerNachrich,
+};
 use futures::SinkExt;
 use iced::widget::{
     button, canvas, column, container, pick_list, row, scrollable, text, text_input,
@@ -14,8 +17,8 @@ use iced::{
 use rodio::{Decoder, OutputStream, Sink, Source};
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::Arc;
 use std::net::UdpSocket;
+use std::sync::Arc;
 use std::time::Instant;
 
 type SharedClient = Arc<tokio::sync::Mutex<Client>>;
@@ -30,10 +33,13 @@ async fn start_server(addr: String) -> Result<String, String> {
         .start_server(&addr)
         .await
         .map_err(|e| e.to_string())?;
-     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
     let lan_ip = UdpSocket::bind("0.0.0.0:0")
-        .and_then(|s| { s.connect("8.8.8.8:80")?; s.local_addr() })
+        .and_then(|s| {
+            s.connect("8.8.8.8:80")?;
+            s.local_addr()
+        })
         .map(|a| a.ip().to_string())
         .unwrap_or_else(|_| "127.0.0.1".to_string());
 
@@ -237,9 +243,9 @@ impl Application for DogApp {
             subs.push(window::frames().map(|_| Message::Tick(Instant::now())));
         }
 
-if let Some(client_arc) = &self.client {
+        if let Some(client_arc) = &self.client {
             let client_clone = Arc::clone(client_arc);
-            
+
             // NEU: Ein Guard, der den Reader rettet, falls Iced den Task abbricht
             struct ReaderGuard {
                 client: Arc<tokio::sync::Mutex<braendi_dog::client::Client>>,
@@ -264,15 +270,16 @@ if let Some(client_arc) = &self.client {
                         let mut guard = client_clone.lock().await;
                         guard.reader.take()
                     };
-                    
+
                     if let Some(reader) = maybe_reader {
                         let mut guard = ReaderGuard {
                             client: client_clone.clone(),
                             reader: Some(reader),
                         };
-                        
+
                         use tokio::io::AsyncBufReadExt;
-                        let mut buf_reader = tokio::io::BufReader::new(guard.reader.as_mut().unwrap());
+                        let mut buf_reader =
+                            tokio::io::BufReader::new(guard.reader.as_mut().unwrap());
                         let mut line = String::new();
                         loop {
                             line.clear();
@@ -280,9 +287,15 @@ if let Some(client_arc) = &self.client {
                                 Ok(0) => break, // EOF
                                 Ok(_) => {
                                     let trimmed = line.trim();
-                                    if trimmed.is_empty() { continue; }
-                                    if let Ok(server_msg) = serde_json::from_str::<braendi_dog::ServerNachrich>(trimmed) {
-                                        let _ = ui_sender.send(Message::IncomingNetwork(server_msg)).await;
+                                    if trimmed.is_empty() {
+                                        continue;
+                                    }
+                                    if let Ok(server_msg) =
+                                        serde_json::from_str::<braendi_dog::ServerNachrich>(trimmed)
+                                    {
+                                        let _ = ui_sender
+                                            .send(Message::IncomingNetwork(server_msg))
+                                            .await;
                                     }
                                 }
                                 Err(_) => break,
@@ -290,7 +303,9 @@ if let Some(client_arc) = &self.client {
                         }
                     }
                     // Verhindert das sofortige Schließen des Channels, falls der Reader gerade woanders ist
-                    loop { tokio::time::sleep(std::time::Duration::from_secs(3600)).await; }
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                    }
                 },
             );
             subs.push(net_sub);
@@ -394,20 +409,20 @@ if let Some(client_arc) = &self.client {
                 }
             }
             Message::ConfirmBotSetup => {
-                  if self.hosting {
-        // Server starten, player_types mitnehmen
-        self.msg = "Starte Server...".into();
-        let addr = self.bind_addr_input.clone();
-        return Command::perform(start_server(addr), Message::ServerStarted);
-    } else {
-        if let Some(variant) = self.build_game_variant() {
-            let mut game = Game::new(variant, self.player_types.clone());
-            game.new_round();
-            self.game = Some(game);
-            self.local_player_index = None;
-            self.screen = Screen::Game;
-        }
-    }
+                if self.hosting {
+                    // Server starten, player_types mitnehmen
+                    self.msg = "Starte Server...".into();
+                    let addr = self.bind_addr_input.clone();
+                    return Command::perform(start_server(addr), Message::ServerStarted);
+                } else {
+                    if let Some(variant) = self.build_game_variant() {
+                        let mut game = Game::new(variant, self.player_types.clone());
+                        game.new_round();
+                        self.game = Some(game);
+                        self.local_player_index = None;
+                        self.screen = Screen::Game;
+                    }
+                }
                 /*
                 if let Some(variant) = self.build_game_variant() {
                     let mut game = Game::new(variant, self.player_types.clone());
@@ -419,8 +434,8 @@ if let Some(client_arc) = &self.client {
             }
             Message::StartGame => {
                 return self.update(Message::GoToBotSetup);
-                
-              /*  if let Some(variant) = self.build_game_variant() {
+
+                /*  if let Some(variant) = self.build_game_variant() {
                     let mut game = Game::new(variant);
                     game.new_round();
                     self.game = Some(game);
@@ -537,7 +552,8 @@ if let Some(client_arc) = &self.client {
                                     let mut from_zwinger = None;
 
                                     match last_entry.action.action {
-                                        ActionKind::Move { from, to } | ActionKind::Split { from, to } => {
+                                        ActionKind::Move { from, to }
+                                        | ActionKind::Split { from, to } => {
                                             is_move = true;
                                             from_idx = from;
                                             to_idx = to;
@@ -552,8 +568,11 @@ if let Some(client_arc) = &self.client {
 
                                     if is_move {
                                         let anim_color_enum = match last_entry.action.action {
-                                            ActionKind::Place { target_player } => new_game.players[target_player].color,
-                                            ActionKind::Move { to, .. } | ActionKind::Split { to, .. } => {
+                                            ActionKind::Place { target_player } => {
+                                                new_game.players[target_player].color
+                                            }
+                                            ActionKind::Move { to, .. }
+                                            | ActionKind::Split { to, .. } => {
                                                 if let Some(piece) = &new_game.board.tiles[to] {
                                                     new_game.players[piece.owner].color
                                                 } else {
@@ -569,7 +588,9 @@ if let Some(client_arc) = &self.client {
                                             GameColor::Blue => IcedColor::from_rgb(0.2, 0.2, 0.8),
                                             GameColor::Yellow => IcedColor::from_rgb(0.8, 0.8, 0.2),
                                             GameColor::Purple => IcedColor::from_rgb(0.5, 0.0, 0.5),
-                                            GameColor::Orange => IcedColor::from_rgb(1.0, 0.65, 0.0),
+                                            GameColor::Orange => {
+                                                IcedColor::from_rgb(1.0, 0.65, 0.0)
+                                            }
                                         };
 
                                         self.animation = Some(MoveAnimation {
@@ -587,9 +608,10 @@ if let Some(client_arc) = &self.client {
 
                         // Spiel-Status normal übernehmen
                         self.game = Some(new_game);
-                        
+
                         if let Some(game) = &self.game {
-                            let my_idx = self.local_player_index.unwrap_or(game.current_player_index);
+                            let my_idx =
+                                self.local_player_index.unwrap_or(game.current_player_index);
                             if my_idx == game.current_player_index {
                                 self.msg = "Du bist am Zug!".to_string();
                             } else {
@@ -719,8 +741,12 @@ impl DogApp {
         };
 
         match &self.pending_action {
-            Some(PendingAction::Move { from: Some(from_idx) }) => {
-                let Some(card) = self.selected_card else { return vec![]; };
+            Some(PendingAction::Move {
+                from: Some(from_idx),
+            }) => {
+                let Some(card) = self.selected_card else {
+                    return vec![];
+                };
                 let mut targets = Vec::new();
                 let board_len = game.board.tiles.len();
 
@@ -733,9 +759,13 @@ impl DogApp {
                     let max_steps = game.split_rest.unwrap_or(7) as i8;
                     (1..=max_steps).collect()
                 } else {
-                    let mut dists: Vec<i8> = card.possible_distances().into_iter().map(|x| x as i8).collect();
+                    let mut dists: Vec<i8> = card
+                        .possible_distances()
+                        .into_iter()
+                        .map(|x| x as i8)
+                        .collect();
                     if matches!(card, Card::Joker | Card::Four) {
-                        dists.push(-4); 
+                        dists.push(-4);
                     }
                     dists
                 };
@@ -743,22 +773,29 @@ impl DogApp {
                 for dist in distances {
                     let backward = dist < 0;
                     let abs_dist = dist.abs() as u8;
-
+                    if let None = game.board.check_tile(*from_idx) {
+                        continue;
+                    }
                     if !game.can_piece_move_distance(*from_idx, abs_dist, backward) {
                         continue;
                     }
 
                     for to_idx in 0..board_len {
                         if let Some(piece) = &game.board.tiles[*from_idx] {
-                            if *from_idx < game.board.ring_size && to_idx >= game.board.ring_size && !piece.left_start {
-                                continue; 
+                            if *from_idx < game.board.ring_size
+                                && to_idx >= game.board.ring_size
+                                && !piece.left_start
+                            {
+                                continue;
                             }
                         }
 
                         let ok = if backward {
-                            game.board.distance_between(to_idx, *from_idx, piece_owner) == Some(abs_dist)
+                            game.board.distance_between(to_idx, *from_idx, piece_owner)
+                                == Some(abs_dist)
                         } else {
-                            game.board.distance_between(*from_idx, to_idx, piece_owner) == Some(abs_dist)
+                            game.board.distance_between(*from_idx, to_idx, piece_owner)
+                                == Some(abs_dist)
                         };
 
                         if ok {
@@ -770,12 +807,14 @@ impl DogApp {
                 targets.dedup();
                 targets
             }
-            
-            Some(PendingAction::Interchange { from: Some(first_idx) }) => {
+
+            Some(PendingAction::Interchange {
+                from: Some(first_idx),
+            }) => {
                 let mut targets = Vec::new();
-                
+
                 let first_owner = game.board.tiles[*first_idx].as_ref().map(|p| p.owner);
-                
+
                 for (to_idx, tile) in game.board.tiles.iter().enumerate() {
                     if let Some(piece) = tile {
                         if to_idx < game.board.ring_size && piece.left_start {
@@ -872,14 +911,14 @@ impl DogApp {
                 .spacing(15),
             );
 
-            if self.msg.starts_with("Server läuft") {
-        host_controls = host_controls.push(
-            text(&self.msg)
-                .size(16)
-                .style(IcedColor::from_rgb(0.3, 1.0, 0.5))
-                .horizontal_alignment(iced::alignment::Horizontal::Center)
-        );
-    }
+        if self.msg.starts_with("Server läuft") {
+            host_controls = host_controls.push(
+                text(&self.msg)
+                    .size(16)
+                    .style(IcedColor::from_rgb(0.3, 1.0, 0.5))
+                    .horizontal_alignment(iced::alignment::Horizontal::Center),
+            );
+        }
 
         let join_controls = column![
             text("Oder bestehendem Spiel beitreten:")
@@ -969,8 +1008,12 @@ impl DogApp {
         let mut player_rows = column![].spacing(12);
 
         let colors = [
-            GameColor::Red, GameColor::Green, GameColor::Blue,
-            GameColor::Yellow, GameColor::Purple, GameColor::Orange,
+            GameColor::Red,
+            GameColor::Green,
+            GameColor::Blue,
+            GameColor::Yellow,
+            GameColor::Purple,
+            GameColor::Orange,
         ];
 
         for (idx, pt) in self.player_types.iter().enumerate() {
@@ -1039,7 +1082,9 @@ impl DogApp {
             )
             .padding(50)
             .style(|_: &Theme| container::Appearance {
-                background: Some(iced::Background::Color(IcedColor::from_rgba(0.0, 0.0, 0.0, 0.6))),
+                background: Some(iced::Background::Color(IcedColor::from_rgba(
+                    0.0, 0.0, 0.0, 0.6,
+                ))),
                 border: iced::Border {
                     radius: 20.0.into(),
                     width: 3.0,
@@ -1411,7 +1456,7 @@ impl DogApp {
                             .on_press(Message::GameActionBtn(GameAction::Undo))
                             .width(Length::Fill),
                     );
-                }else {
+                } else {
                     let can_do_anything = game.check_if_any_action_possible();
                     if !can_do_anything {
                         btns = btns.push(
@@ -1426,6 +1471,29 @@ impl DogApp {
                         );
                     } else {
                         if let Some(card) = self.selected_card {
+                            let legal_actions = generator::generate_all_legal_actions(game);
+                            let matching_actions: Vec<_> = legal_actions
+                                .into_iter()
+                                .filter(|action| action.card == Some(card))
+                                .collect();
+                            let has_move_action = matching_actions
+                                .iter()
+                                .any(|a| matches!(a.action, ActionKind::Move { .. }));
+                            let has_split_action = matching_actions
+                                .iter()
+                                .any(|a| matches!(a.action, ActionKind::Split { .. }));
+
+                            let has_place_action = matching_actions
+                                .iter()
+                                .any(|a| matches!(a.action, ActionKind::Place { .. }));
+
+                            let has_interchange_action = matching_actions
+                                .iter()
+                                .any(|a| matches!(a.action, ActionKind::Interchange { .. }));
+
+                            let has_grab_action = matching_actions
+                                .iter()
+                                .any(|a| matches!(a.action, ActionKind::Grab { .. }));
                             let is_place_card =
                                 matches!(card, Card::Ace | Card::King | Card::Joker);
                             let is_move_card = !card.possible_distances().is_empty()
@@ -1436,28 +1504,28 @@ impl DogApp {
                             let is_ffa =
                                 matches!(self.selected_variant, Some(GameVariantKind::FreeForAll));
 
-                            if is_move_card && !is_jack {
+                            if is_move_card && !is_jack && (has_move_action || has_split_action) {
                                 btns = btns.push(
                                     button(text("Ziehen / Split (Move)").size(font_std))
                                         .on_press(Message::GameActionBtn(GameAction::Move))
                                         .width(Length::Fill),
                                 );
                             }
-                            if is_place_card {
+                            if is_place_card && has_place_action {
                                 btns = btns.push(
                                     button(text("Legen (Place)").size(font_std))
                                         .on_press(Message::GameActionBtn(GameAction::Place))
                                         .width(Length::Fill),
                                 );
                             }
-                            if is_interchange_card {
+                            if is_interchange_card && has_interchange_action {
                                 btns = btns.push(
                                     button(text("Tauschen (Interchange)").size(font_std))
                                         .on_press(Message::GameActionBtn(GameAction::Interchange))
                                         .width(Length::Fill),
                                 );
                             }
-                            if is_grab_card && is_ffa {
+                            if is_grab_card && is_ffa && has_grab_action {
                                 btns = btns.push(
                                     button(text("Klauen (Grab)").size(font_std))
                                         .on_press(Message::GameActionBtn(GameAction::Grab))
@@ -1522,7 +1590,7 @@ impl DogApp {
     fn handle_btn_click(&mut self, action_type: GameAction) -> Command<Message> {
         let game = self.game.as_ref().unwrap();
         let my_idx = self.local_player_index.unwrap_or(game.current_player_index);
-        
+
         if my_idx != game.current_player_index {
             self.msg = "Es ist nicht dein Zug!".into();
             return Command::none();
@@ -1533,12 +1601,17 @@ impl DogApp {
             let play_str = "undo".to_string();
             self.selected_card = None;
             self.pending_action = None;
-            
+
             if let Some(client) = &self.client {
                 let client = Arc::clone(client);
                 return Command::perform(
                     async move {
-                        client.lock().await.make_play(&play_str).await.map_err(|e| e.to_string())
+                        client
+                            .lock()
+                            .await
+                            .make_play(&play_str)
+                            .await
+                            .map_err(|e| e.to_string())
                     },
                     Message::PlayResult,
                 );
@@ -2345,14 +2418,14 @@ impl<'a> canvas::Program<Message> for HandView<'a> {
 fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, color: IcedColor) {
     let center = rect.center();
     let w = rect.width;
-    
+
     // Erweiterte Farbpalette für mehr Details
     let haut = IcedColor::from_rgb(0.98, 0.88, 0.75);
     let gold = IcedColor::from_rgb(1.0, 0.8, 0.0);
     let blond = IcedColor::from_rgb(0.95, 0.85, 0.3);
     let rot = IcedColor::from_rgb(0.85, 0.1, 0.1);
     let braun = IcedColor::from_rgb(0.3, 0.15, 0.05); // Für Haare
-    let blau = IcedColor::from_rgb(0.2, 0.4, 0.8);   // Für den Buben-Hut
+    let blau = IcedColor::from_rgb(0.2, 0.4, 0.8); // Für den Buben-Hut
     let schwarz = IcedColor::BLACK;
 
     match card {
@@ -2360,14 +2433,16 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
             let r = w * 0.26;
             // Haare / Basis
             frame.fill(&canvas::Path::circle(center, r + 2.0), blond);
-            
+
             // Gesicht
             frame.fill(&canvas::Path::circle(center, r), haut);
             frame.stroke(
                 &canvas::Path::circle(center, r),
-                canvas::Stroke::default().with_width(1.5).with_color(schwarz),
+                canvas::Stroke::default()
+                    .with_width(1.5)
+                    .with_color(schwarz),
             );
-            
+
             // Krone
             frame.fill(
                 &canvas::Path::new(|p| {
@@ -2383,32 +2458,39 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
                 }),
                 gold,
             );
-            
+
             draw_eyes(frame, center, 2.0);
-            
+
             // Bart und Mund
-            frame.fill(&canvas::Path::circle(Point::new(center.x, center.y + 8.0), 5.0), blond);
+            frame.fill(
+                &canvas::Path::circle(Point::new(center.x, center.y + 8.0), 5.0),
+                blond,
+            );
             frame.stroke(
                 &canvas::Path::new(|p| {
                     p.move_to(Point::new(center.x - 3.0, center.y + 6.0));
                     p.line_to(Point::new(center.x + 3.0, center.y + 6.0));
                 }),
-                canvas::Stroke::default().with_width(1.0).with_color(schwarz),
+                canvas::Stroke::default()
+                    .with_width(1.0)
+                    .with_color(schwarz),
             );
         }
         Card::Queen => {
             let r = w * 0.24;
-            
+
             // Braune Haare im Hintergrund
             frame.fill(&canvas::Path::circle(center, r + 2.0), braun);
-            
+
             // Gesicht
             frame.fill(&canvas::Path::circle(center, r), haut);
             frame.stroke(
                 &canvas::Path::circle(center, r),
-                canvas::Stroke::default().with_width(1.5).with_color(schwarz),
+                canvas::Stroke::default()
+                    .with_width(1.5)
+                    .with_color(schwarz),
             );
-            
+
             // Krone
             frame.fill(
                 &canvas::Path::new(|p| {
@@ -2419,9 +2501,9 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
                 }),
                 gold,
             );
-            
+
             draw_eyes(frame, center, 1.8);
-            
+
             // Roter Kussmund
             frame.fill(
                 &canvas::Path::circle(Point::new(center.x, center.y + 5.0), 2.0),
@@ -2430,14 +2512,16 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
         }
         Card::Jack => {
             let r = w * 0.23;
-            
+
             // Gesicht
             frame.fill(&canvas::Path::circle(center, r), haut);
             frame.stroke(
                 &canvas::Path::circle(center, r),
-                canvas::Stroke::default().with_width(1.5).with_color(schwarz),
+                canvas::Stroke::default()
+                    .with_width(1.5)
+                    .with_color(schwarz),
             );
-            
+
             // Blauer Buben-Hut
             frame.fill(
                 &canvas::Path::new(|p| {
@@ -2448,28 +2532,32 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
                 }),
                 blau,
             );
-            
+
             draw_eyes(frame, center, 2.0);
-            
+
             // Freches Grinsen
             frame.stroke(
                 &canvas::Path::new(|p| {
                     p.move_to(Point::new(center.x - 4.0, center.y + 5.0));
                     p.line_to(Point::new(center.x + 3.0, center.y + 4.0));
                 }),
-                canvas::Stroke::default().with_width(1.0).with_color(schwarz),
+                canvas::Stroke::default()
+                    .with_width(1.0)
+                    .with_color(schwarz),
             );
         }
         Card::Joker => {
             let r = w * 0.22;
-            
+
             // Gesicht (Weiß)
             frame.fill(&canvas::Path::circle(center, r), IcedColor::WHITE);
             frame.stroke(
                 &canvas::Path::circle(center, r),
-                canvas::Stroke::default().with_width(1.5).with_color(schwarz),
+                canvas::Stroke::default()
+                    .with_width(1.5)
+                    .with_color(schwarz),
             );
-            
+
             // Roter Narrenhut
             frame.fill(
                 &canvas::Path::new(|p| {
@@ -2483,17 +2571,23 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
                 rot,
             );
             // Goldene Glöckchen am Hut
-            frame.fill(&canvas::Path::circle(Point::new(center.x - r * 1.5, center.y - r * 1.5), 3.0), gold);
-            frame.fill(&canvas::Path::circle(Point::new(center.x + r * 1.5, center.y - r * 1.5), 3.0), gold);
+            frame.fill(
+                &canvas::Path::circle(Point::new(center.x - r * 1.5, center.y - r * 1.5), 3.0),
+                gold,
+            );
+            frame.fill(
+                &canvas::Path::circle(Point::new(center.x + r * 1.5, center.y - r * 1.5), 3.0),
+                gold,
+            );
 
             draw_eyes(frame, center, 2.5);
-            
+
             // Rote Clown-Nase
             frame.fill(
                 &canvas::Path::circle(Point::new(center.x, center.y + 1.0), 3.5),
                 rot,
             );
-            
+
             // Breites rotes Joker-Lächeln
             frame.stroke(
                 &canvas::Path::new(|p| {

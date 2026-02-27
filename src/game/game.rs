@@ -473,7 +473,7 @@ impl Game {
     }
 
     pub fn can_piece_move_distance(&self, from: usize, dist: u8, backward: bool) -> bool {
-        let piece = self.board.tiles[from].as_ref().unwrap_();
+        let piece = self.board.tiles[from].as_ref().unwrap();
 
         for to in 0..self.board.tiles.len() {
             let valid = if backward {
