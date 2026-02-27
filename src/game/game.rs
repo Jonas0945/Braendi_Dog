@@ -862,7 +862,7 @@ impl Game {
         }
 
         // FIX 5: Verhindere Doppel-Tausch!
-        if self.trade_buffer.iter().any(|(from, _, _)| *from == player_index) {
+       if self.trade_buffer.iter().any(|(_, to, _)| *to == player_index) {
             return Err("Du hast bereits eine Karte zum Tauschen ausgewählt!");
         }
 
@@ -1250,8 +1250,7 @@ impl DogGame for Game {
         }
 
         match _action.action {
-            ActionKind::TradeGrab { .. } => {
-                if card.is_some() {
+            ActionKind::TradeGrab { .. } | ActionKind::Undo => {                if card.is_some() {
                     return Err("Invalid action: TradeGrab does not use a card.");
                 }
             }
@@ -1307,6 +1306,10 @@ impl DogGame for Game {
             ActionKind::Grab { .. } => {
                 self.action_grab(current_player, _action)?;
             },
+            ActionKind::Undo => { 
+                self.undo_turn()?;
+                return Ok(());
+            }
         }
 
         if self.all_players_out_of_cards() {
@@ -1463,16 +1466,12 @@ impl DogGame for Game {
 
                 }
 
+                let grabbed_from_player = entry.grabbed_from_player.unwrap();
+                let grabbed_card_index = entry.grabbed_card_index.unwrap();
+                let grabbed_card = entry.grabbed_card.unwrap();
 
-                    let grabbed_from_player = entry.grabbed_from_player.unwrap();
-                    let grabbed_card_index = entry.grabbed_card_index.unwrap();
-                    let grabbed_card = entry.grabbed_card.unwrap();
-
-                    self.players[grabbed_from_player].cards
-                        .insert(grabbed_card_index, grabbed_card);
-
-
-
+                self.players[grabbed_from_player].cards
+                    .insert(grabbed_card_index, grabbed_card);
 
                 self.trade_buffer = entry.trade_buffer_before;
                 self.current_player_index = entry_player_index;
@@ -1547,6 +1546,10 @@ impl DogGame for Game {
 
                 self.prev_player();
             }
+
+            ActionKind::Undo => {
+             
+            }
         }
 
         Ok(())
@@ -1603,7 +1606,7 @@ impl DogGame for Game {
         self.deck.shuffle();
         self.discard.clear();
 
-        let round_index = (self.round - 1) % 4;
+        let round_index = (self.round - 1) % 5; 
         let cards_to_deal = CARDS_PER_ROUND[round_index as usize];
 
         // Deal cards
@@ -1633,18 +1636,21 @@ impl DogGame for Game {
     }
 
     fn is_winner(&self) -> bool {
-        let current_index = self.current_player_index;
-
         if let Some(teams) = &self.teams {
-            if let Some(team) = teams.iter().find(|t| t.contains(&current_index)) {
-                // Team wins if all members have 4 pieces in house
-                return team.iter().all(|&i| self.players[i].pieces_in_house == 4);
+            for team in teams {
+                // Ein Team gewinnt, wenn ALLE Mitglieder 4 Figuren im Haus haben
+                if team.iter().all(|&i| self.players[i].pieces_in_house == 4) {
+                    return true;
+                }
             }
         } else {
-            // Free-for-all: player wins if he has 4 pieces in house
-            return self.players[current_index].pieces_in_house == 4;
+            // Free-for-all: Irgendein Spieler hat 4 Figuren im Haus
+            for player in &self.players {
+                if player.pieces_in_house == 4 {
+                    return true;
+                }
+            }
         }
-
         false
     }
 }
