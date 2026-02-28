@@ -2008,12 +2008,12 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
                 .with_color(IcedColor::from_rgb(0.5, 0.3, 0.1)),
         );
 
-        for offset in 1..total_players {
+       for offset in 1..total_players {
             let opponent_idx = (self.my_idx + offset) % total_players;
             let card_count = self.game.players[opponent_idx].cards.len();
             let cw = 30.0 * scale;
             let ch = 45.0 * scale;
-            let card_orbit_radius = board_radius + (ch / 2.0) + (15.0 * scale);
+            let card_orbit_radius = board_radius + (ch / 2.0) + (20.0 * scale); 
             let angle_step = std::f32::consts::TAU / (total_players as f32);
             let card_angle = std::f32::consts::FRAC_PI_2 - (offset as f32 * angle_step);
             let center_card_pos = Point::new(
@@ -2021,38 +2021,83 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
                 center.y + card_orbit_radius * card_angle.sin(),
             );
             let is_horizontal = card_angle.cos().abs() < 0.5;
-            for c in 0..card_count {
-                let spread = 15.0 * scale;
-                let total_w = (card_count as f32 - 1.0) * spread;
-                let pos = if !is_horizontal {
-                    Point::new(
-                        center_card_pos.x,
-                        center_card_pos.y - total_w / 2.0 + (c as f32 * spread),
-                    )
-                } else {
-                    Point::new(
-                        center_card_pos.x - total_w / 2.0 + (c as f32 * spread),
-                        center_card_pos.y,
-                    )
-                };
-                let rect = if !is_horizontal {
+            
+            if card_count > 0 {
+                for c in 0..card_count {
+                    let spread = 15.0 * scale;
+                    let total_w = (card_count as f32 - 1.0) * spread;
+                    let pos = if !is_horizontal {
+                        Point::new(
+                            center_card_pos.x,
+                            center_card_pos.y - total_w / 2.0 + (c as f32 * spread),
+                        )
+                    } else {
+                        Point::new(
+                            center_card_pos.x - total_w / 2.0 + (c as f32 * spread),
+                            center_card_pos.y,
+                        )
+                    };
+                    let rect = if !is_horizontal {
+                        iced::Rectangle::new(
+                            Point::new(pos.x - ch / 2.0, pos.y - cw / 2.0),
+                            iced::Size::new(ch, cw),
+                        )
+                    } else {
+                        iced::Rectangle::new(
+                            Point::new(pos.x - cw / 2.0, pos.y - ch / 2.0),
+                            iced::Size::new(cw, ch),
+                        )
+                    };
+                    let back = canvas::Path::rectangle(rect.position(), rect.size());
+                    
+                    frame.fill(&back, IcedColor::from_rgb(0.15, 0.3, 0.7));
+                    frame.stroke(
+                        &back,
+                        canvas::Stroke::default()
+                            .with_color(IcedColor::WHITE)
+                            .with_width(2.0 * scale),
+                    );
+                }
+
+                let badge_radius = 15.0 * scale;
+                frame.fill(
+                    &canvas::Path::circle(center_card_pos, badge_radius),
+                    IcedColor::from_rgb(0.9, 0.2, 0.2), 
+                );
+                frame.stroke(
+                    &canvas::Path::circle(center_card_pos, badge_radius),
+                    canvas::Stroke::default()
+                        .with_color(IcedColor::WHITE)
+                        .with_width(2.0 * scale),
+                );
+                frame.fill_text(canvas::Text {
+                    content: format!("{}", card_count),
+                    position: Point::new(center_card_pos.x, center_card_pos.y + 1.0 * scale),
+                    color: IcedColor::WHITE,
+                    size: (18.0 * scale).into(),
+                    horizontal_alignment: iced::alignment::Horizontal::Center,
+                    vertical_alignment: iced::alignment::Vertical::Center,
+                    ..Default::default()
+                });
+            } else {
+                let empty_rect = if !is_horizontal {
                     iced::Rectangle::new(
-                        Point::new(pos.x - ch / 2.0, pos.y - cw / 2.0),
+                        Point::new(center_card_pos.x - ch / 2.0, center_card_pos.y - cw / 2.0),
                         iced::Size::new(ch, cw),
                     )
                 } else {
                     iced::Rectangle::new(
-                        Point::new(pos.x - cw / 2.0, pos.y - ch / 2.0),
+                        Point::new(center_card_pos.x - cw / 2.0, center_card_pos.y - ch / 2.0),
                         iced::Size::new(cw, ch),
                     )
                 };
-                let back = canvas::Path::rectangle(rect.position(), rect.size());
-                frame.fill(&back, IcedColor::from_rgb(0.2, 0.3, 0.7));
+                let back = canvas::Path::rectangle(empty_rect.position(), empty_rect.size());
+                frame.fill(&back, IcedColor::from_rgba(0.0, 0.0, 0.0, 0.15));
                 frame.stroke(
                     &back,
                     canvas::Stroke::default()
-                        .with_color(IcedColor::WHITE)
-                        .with_width(2.0 * scale),
+                        .with_color(IcedColor::from_rgba(1.0, 1.0, 1.0, 0.4))
+                        .with_width(1.0 * scale),
                 );
             }
         }
