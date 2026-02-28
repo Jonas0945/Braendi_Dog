@@ -220,6 +220,8 @@ impl GameServer {
 
                 let mut outbox: Vec<(usize, String)> = Vec::new();
                 let mut state_changed = false;
+                
+                let mut human_played_this_tick = false;
 
                 if !actions.is_empty() {
                     let mut game_guard = game_loop_game_ref.lock().unwrap();
@@ -232,11 +234,14 @@ impl GameServer {
                                 .cloned();
                             let current_color = game.current_player().color;
 
+                            let is_undo = actionsstr.eq_ignore_ascii_case("undo");
+
                             if let Some(col) = player_color {
-                                if current_color == col {
+                                if current_color == col || is_undo {
                                     match game.play(&actionsstr) {
                                         Ok(()) => {
                                             state_changed = true;
+                                            human_played_this_tick = true; // Mensch hat erfolgreich gezogen!
                                         }
                                         Err(e) => {
                                             let err_json = serde_json::to_string(
@@ -267,109 +272,116 @@ impl GameServer {
                     }
                 }
 
-                
-                let mut sleep_after = false;
-                let mut force_undo = false;
-                let mut force_next = false;
+                let mut sleep_duration = 0; 
 
-                // 1. Checken, ob der Bot überhaupt Züge hat
-                {
-                    let mut game_guard = game_loop_game_ref.lock().unwrap();
-                    if let Some(game) = game_guard.as_mut() {
-                        let current_idx = game.current_player_index;
-                        if game.players[current_idx].player_type != PlayerType::Human {
-                            let actions_vec = generate_all_legal_actions(&game);
-                            if actions_vec.is_empty() {
-                                if game.split_rest.is_some() {
-                                    println!("Bot steckt im Split fest! Führe Undo aus.");
-                                    force_undo = true;
-                                } else {
-                                    force_next = true;
-                                }
-                            }
-                        }
-                    }
-                }
+                if !human_played_this_tick {
+                    let mut force_undo = false;
+                    let mut force_next = false;
 
-                if force_undo {
-                    let mut game_guard = game_loop_game_ref.lock().unwrap();
-                    let game = game_guard.as_mut().unwrap();
-                    
-                    // Merke dir, welche Karte den Fehler verursacht hat
-                    let mut card_to_burn = None;
-                    if let Some(last_entry) = game.history.last() {
-                        card_to_burn = last_entry.action.card;
-                    }
-                    
-                    // Zug komplett zurückspulen
-                    let _ = game.undo_turn();
-                    
-                    // Straf-Abwurf: Nimm dem Bot die kaputte Karte weg, sonst spielt er sie wieder!
-                    if let Some(c) = card_to_burn {
-                        let idx = game.current_player_index;
-                        game.players[idx].remove_card(c);
-                        game.discard.push(c);
-                        println!("Bot-Loop durchbrochen: Karte {:?} abgeworfen.", c);
-                    }
-                    
-                    game.next_player();
-                    state_changed = true;
-                    sleep_after = true;
-                    
-                } else if force_next {
-                    let mut game_guard = game_loop_game_ref.lock().unwrap();
-                    let game = game_guard.as_mut().unwrap();
-                    let idx = game.current_player_index;
-                    
-                    // Bot hat gar keine Züge -> Muss eine Karte abwerfen, bevor er passt!
-                    if !game.players[idx].cards.is_empty() {
-                        let card = game.players[idx].cards.remove(0);
-                        game.discard.push(card);
-                        println!("Bot muss passen und wirft Karte ab.");
-                    }
-                    
-                    game.next_player();
-                    state_changed = true;
-                    sleep_after = true;
-                } else {
-                    // 2. Bot Zug berechnen (ohne den Server zu blockieren!)
-                    let bot_action = {
-                        let game_clone_opt = {
-                            let guard = game_loop_game_ref.lock().unwrap();
-                            guard.as_ref().map(|g| g.clone())
-                        };
-
-                        if let Some(mut game_clone) = game_clone_opt {
-                            let current_idx = game_clone.current_player_index;
-                            match game_clone.players[current_idx].player_type {
-                                PlayerType::Human => None,
-                                PlayerType::RandomBot => {
-                                    let actions = generate_all_legal_actions(&game_clone);
-                                    RandomBot::new().choose_action(&mut game_clone, actions)
-                                }
-                                PlayerType::EvalBot => {
-                                    let actions = generate_all_legal_actions(&game_clone);
-                                    tokio::task::block_in_place(|| {
-                                        EvalBot::new().choose_action(&mut game_clone, actions)
-                                    })
-                                }
-                            }
-                        } else {
-                            None
-                        }
-                    };
-
-                    // 3. Ausführen der Aktion
-                    if let Some(chosen) = bot_action {
-                        let play_str = chosen.to_string();
+                    {
                         let mut game_guard = game_loop_game_ref.lock().unwrap();
                         if let Some(game) = game_guard.as_mut() {
-                            match game.play(&play_str) {
-                                Ok(()) => state_changed = true,
-                                Err(e) => println!("Bot play error: {}", e),
+                            let current_idx = game.current_player_index;
+                            if game.players[current_idx].player_type != PlayerType::Human {
+                                let actions_vec = generate_all_legal_actions(&game);
+                                if actions_vec.is_empty() {
+                                    if game.split_rest.is_some() {
+                                        println!("Bot steckt im Split fest! Führe Undo aus.");
+                                        force_undo = true;
+                                    } else {
+                                        force_next = true;
+                                    }
+                                }
                             }
                         }
-                        sleep_after = true;
+                    }
+
+                    if force_undo {
+                        let mut game_guard = game_loop_game_ref.lock().unwrap();
+                        let game = game_guard.as_mut().unwrap();
+                        
+                        let mut card_to_burn = None;
+                        if let Some(last_entry) = game.history.last() {
+                            card_to_burn = last_entry.action.card;
+                        }
+                        
+                        let _ = game.undo_turn();
+                        
+                        if let Some(c) = card_to_burn {
+                            let idx = game.current_player_index;
+                            game.players[idx].remove_card(c);
+                            game.discard.push(c);
+                            println!("Bot-Loop durchbrochen: Karte {:?} abgeworfen.", c);
+                        }
+                        
+                        game.next_player();
+                        state_changed = true;
+                        sleep_duration = 1500;
+                        
+                    } else if force_next {
+                        let mut game_guard = game_loop_game_ref.lock().unwrap();
+                        let game = game_guard.as_mut().unwrap();
+                        let idx = game.current_player_index;
+                        
+                        if !game.players[idx].cards.is_empty() {
+                            let min_index = game.players[idx].cards.iter()
+                                .enumerate()
+                                .min_by_key(|&(_, c)| c.value())
+                                .map(|(i, _)| i)
+                                .unwrap_or(0);
+                                
+                            let card = game.players[idx].cards.remove(min_index);
+                            game.discard.push(card);
+                            println!("Bot muss passen und wirft Karte ab.");
+                        }
+                        
+                        game.next_player();
+                        state_changed = true;
+                        sleep_duration = 1000;
+                    } else {
+                        let bot_action = {
+                            let game_clone_opt = {
+                                let guard = game_loop_game_ref.lock().unwrap();
+                                guard.as_ref().map(|g| g.clone())
+                            };
+
+                            if let Some(mut game_clone) = game_clone_opt {
+                                let current_idx = game_clone.current_player_index;
+                                match game_clone.players[current_idx].player_type {
+                                    PlayerType::Human => None,
+                                    PlayerType::RandomBot => {
+                                        let actions = generate_all_legal_actions(&game_clone);
+                                        RandomBot::new().choose_action(&mut game_clone, actions)
+                                    }
+                                    PlayerType::EvalBot => {
+                                        let actions = generate_all_legal_actions(&game_clone);
+                                        tokio::task::block_in_place(|| {
+                                            EvalBot::new().choose_action(&mut game_clone, actions)
+                                        })
+                                    }
+                                }
+                            } else {
+                                None
+                            }
+                        };
+
+                        if let Some(chosen) = bot_action {
+                            let play_str = chosen.to_string();
+                            let mut game_guard = game_loop_game_ref.lock().unwrap();
+                            if let Some(game) = game_guard.as_mut() {
+                                match game.play(&play_str) {
+                                    Ok(()) => state_changed = true,
+                                    Err(e) => println!("Bot play error: {}", e),
+                                }
+                            }
+                            sleep_duration = 1500; 
+                        }
+                    }
+                } else {
+                   
+                    let is_trading = game_loop_game_ref.lock().unwrap().as_ref().map(|g| g.trading_phase).unwrap_or(false);
+                    if !is_trading {
+                        sleep_duration = 600; 
                     }
                 }
 
@@ -384,7 +396,9 @@ impl GameServer {
                         })
                     };
                     if let Some(msg) = state_msg {
-                        broadcast(&mut clients_guard, &msg).await;
+                        for writer in clients_guard.values_mut() {
+                            let _ = writer.write_all(msg.as_bytes()).await;
+                        }
                     }
                 }
 
@@ -393,8 +407,9 @@ impl GameServer {
                         let _ = writer.write_all(message.as_bytes()).await;
                     }
                 }
-                if sleep_after {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
+                
+                if sleep_duration > 0 {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(sleep_duration)).await;
                 }
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             }
@@ -402,6 +417,7 @@ impl GameServer {
         Ok(())
     }
 }
+
 
 async fn broadcast(clients: &mut HashMap<ClientID, OwnedWriteHalf>, message: &str) {
     for writer in clients.values_mut() {
