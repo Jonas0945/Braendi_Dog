@@ -1,6 +1,12 @@
 use crate::{Action, ActionKind, game::{Game, board::Point, game::GameVariant}};
 use crate::game::card::Card;
 
+/// Comments by Sebastian Servos
+/// This module contains functions to generate all legal actions for a given game state. These are used by the EvalBot to evaluate and select the best action. 
+/// The generation is split into different functions for each type of action (place, trade, split, grab, move, interchange) to keep the code organized and maintainable. 
+/// Each function checks the specific rules and conditions for that action type to ensure only legal actions are generated.
+
+
 pub fn generate_all_legal_actions(game: &Game) -> Vec<Action> {
     let mut total_actions = Vec::new();
 
