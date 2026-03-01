@@ -3,9 +3,11 @@ use braendi_dog::ai::generator;
 use braendi_dog::client::{Client, join_running_game};
 use braendi_dog::game::player::PlayerType;
 use braendi_dog::server::GameServer;
+//use braendi_dog::{Action, ActionKind, Card, Color as GameColor, DogGame, Game, GameVariant, ServerNachrich,};
 use braendi_dog::{
-    Action, ActionKind, Card, Color as GameColor, DogGame, Game, GameVariant, ServerNachrich,
+    Action, ActionKind, Card, Color as GameColor, DogGame, Game, GameVariant,
 };
+use braendi_dog::ai::bot::Bot;
 use futures::SinkExt;
 use iced::widget::{
     button, canvas, column, container, pick_list, row, scrollable, text, text_input,
@@ -24,7 +26,13 @@ use std::time::Instant;
 type SharedClient = Arc<tokio::sync::Mutex<Client>>;
 
 pub fn launch() -> iced::Result {
-    DogApp::run(Settings::default())
+    DogApp::run(Settings {
+        window: iced::window::Settings {
+            size: Size::new(1330.0, 1000.0), 
+            ..Default::default()
+        },
+        ..Default::default()
+    })
 }
 
 async fn start_server(addr: String) -> Result<String, String> {
@@ -118,6 +126,7 @@ struct MoveAnimation {
     color: IcedColor,
     progress: f32,
     from_zwinger_of_player: Option<usize>,
+    is_capture: bool,
 }
 #[derive(Debug, Clone)]
 struct Confetti {
@@ -145,7 +154,6 @@ struct DogApp {
     player_name_input: String,
     client: Option<SharedClient>,
 
-    // NEU: Damit die GUI weiß, wer WIR am PC eigentlich sind!
     local_player_index: Option<usize>,
 
     selected_opponent: Option<usize>,
@@ -157,6 +165,8 @@ struct DogApp {
     audio_sink: Option<Sink>,
     player_types: Vec<PlayerType>,
     hosting: bool,
+    bot_computing: bool,
+    spinner_angle: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -188,6 +198,8 @@ enum Message {
     GoToBotSetup,
     PlayerTypeChanged(usize, PlayerType),
     ConfirmBotSetup,
+    TriggerLocalBot, 
+    LocalBotCalculated(Option<Action>, bool, bool), 
     None,
 }
 
@@ -201,7 +213,7 @@ impl Application for DogApp {
         let mut app = DogApp {
             game: None,
             screen: Screen::Start,
-            window_size: Size::new(1024.0, 768.0),
+            window_size: Size::new(1330.0, 1000.0),
             selected_variant: None,
             ffa_players_input: String::new(),
             selected_card: None,
@@ -221,6 +233,8 @@ impl Application for DogApp {
             audio_sink: None,
             player_types: Vec::new(),
             hosting: false,
+            bot_computing: false,
+            spinner_angle: 0.0,
         };
         app.play_audio("lobby.mp3", 0.15, true);
         (app, Command::none())
@@ -238,7 +252,10 @@ impl Application for DogApp {
                 Message::None
             }
         })];
-        let needs_tick = self.animation.is_some() || matches!(self.screen, Screen::GameOver { .. });
+        let needs_tick = self.animation.is_some() 
+            || matches!(self.screen, Screen::Game) 
+            || matches!(self.screen, Screen::GameOver { .. });
+
         if needs_tick {
             subs.push(window::frames().map(|_| Message::Tick(Instant::now())));
         }
@@ -246,7 +263,6 @@ impl Application for DogApp {
         if let Some(client_arc) = &self.client {
             let client_clone = Arc::clone(client_arc);
 
-            // NEU: Ein Guard, der den Reader rettet, falls Iced den Task abbricht
             struct ReaderGuard {
                 client: Arc<tokio::sync::Mutex<braendi_dog::client::Client>>,
                 reader: Option<tokio::net::tcp::OwnedReadHalf>,
@@ -302,7 +318,6 @@ impl Application for DogApp {
                             }
                         }
                     }
-                    // Verhindert das sofortige Schließen des Channels, falls der Reader gerade woanders ist
                     loop {
                         tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
                     }
@@ -322,10 +337,25 @@ impl Application for DogApp {
             Message::Tick(now) => {
                 let delta = now.duration_since(self.last_tick).as_secs_f32();
                 self.last_tick = now;
+                self.spinner_angle += delta * (std::f32::consts::PI / 2.0);
+                if self.spinner_angle > std::f32::consts::TAU {
+                    self.spinner_angle -= std::f32::consts::TAU;
+                }
+                let mut cmds = Vec::new(); 
+                
                 if let Some(anim) = &mut self.animation {
                     anim.progress += delta / 0.4;
                     if anim.progress >= 1.0 {
+                        if anim.is_capture {
+                            play_sfx("beat.mp3", 1.0);
+                        } else {
+                            play_sfx("placing.mp3", 0.4);
+                        }
                         self.animation = None;
+                        
+                        if self.client.is_none() {
+                            cmds.push(Command::perform(async {}, |_| Message::TriggerLocalBot));
+                        }
                     }
                 }
                 if matches!(self.screen, Screen::GameOver { .. }) {
@@ -339,6 +369,19 @@ impl Application for DogApp {
                             c.x = rand::random::<f32>() * self.window_size.width;
                         }
                     }
+                }
+
+                if self.client.is_none() { 
+                    if let Some(game) = &self.game {
+                        let current_p = &game.players[game.current_player_index];
+                        if current_p.player_type == PlayerType::Human {
+                            self.local_player_index = Some(game.current_player_index);
+                        }
+                    }
+                }
+                
+                if !cmds.is_empty() {
+                    return Command::batch(cmds);
                 }
             }
             Message::ShowRules => {
@@ -409,28 +452,156 @@ impl Application for DogApp {
                 }
             }
             Message::ConfirmBotSetup => {
-                if self.hosting {
-                    // Server starten, player_types mitnehmen
-                    self.msg = "Starte Server...".into();
-                    let addr = self.bind_addr_input.clone();
-                    return Command::perform(start_server(addr), Message::ServerStarted);
-                } else {
-                    if let Some(variant) = self.build_game_variant() {
-                        let mut game = Game::new(variant, self.player_types.clone());
+                if let Some(kind) = self.selected_variant {
+                    // 1. GameVariant aus dem UI-Zustand bauen
+                    let variant = match kind {
+                        GameVariantKind::TwoVsTwo => GameVariant::TwoVsTwo,
+                        GameVariantKind::ThreeVsThree => GameVariant::ThreeVsThree,
+                        GameVariantKind::TwoVsTwoVsTwo => GameVariant::TwoVsTwoVsTwo,
+                        GameVariantKind::FreeForAll => {
+                            let n = self.ffa_players_input.parse().unwrap_or(self.player_types.len());
+                            GameVariant::FreeForAll(n)
+                        }
+                    };
+
+                    let p_types = self.player_types.clone();
+
+                    if self.hosting {
+                        // Host-Modus: Server starten
+                        let addr = self.bind_addr_input.clone();
+                        return Command::perform(start_server(addr), Message::ServerStarted);
+                    } else {
+                        // LOKALER MODUS
+                        let mut game = Game::new(variant, p_types);
                         game.new_round();
+
+                        // Namen für lokale Menschen setzen
+                        for (i, p) in game.players.iter_mut().enumerate() {
+                            if p.player_type == PlayerType::Human {
+                                if i == 0 {
+                                    p.name = if self.player_name_input.is_empty() { "Ich".into() } else { self.player_name_input.clone() };
+                                } else {
+                                    p.name = format!("Spieler {}", i + 1);
+                                }
+                            }
+                        }
+
+                        // Kamera auf den ersten Spieler (0) fixieren
+                        self.local_player_index = Some(0);
                         self.game = Some(game);
-                        self.local_player_index = None;
                         self.screen = Screen::Game;
+
+                        // Falls der erste Spieler ein Bot ist, direkt triggern
+                        if self.game.as_ref().unwrap().players[0].player_type != PlayerType::Human {
+                            return Command::perform(async {}, |_| Message::TriggerLocalBot);
+                        }
                     }
                 }
-                /*
-                if let Some(variant) = self.build_game_variant() {
-                    let mut game = Game::new(variant, self.player_types.clone());
-                    game.new_round();
-                    self.game = Some(game);
-                    self.local_player_index = None;
-                    self.screen = Screen::Game;
-                }*/
+            }
+            Message::TriggerLocalBot => {
+                let in_lobby = self.game.as_ref().unwrap().players.iter().any(|p| p.player_type == PlayerType::Human && p.name == "Wartet...");                    if in_lobby { return Command::none(); }
+                if self.client.is_some() || self.animation.is_some() || self.bot_computing {
+                    return Command::none();
+                }
+                if let Some(game) = &self.game {
+                    if game.is_winner() { return Command::none(); }
+
+                    let current_idx = game.current_player_index;
+                    let player_type = game.players[current_idx].player_type;
+
+                    if player_type != PlayerType::Human {
+                        self.bot_computing = true;
+                        let game_clone = game.clone();
+
+                        return Command::perform(
+                            async move {
+                                tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+
+                                let mut force_undo = false;
+                                let mut force_next = false;
+                                let mut chosen_action = None;
+
+                                let actions = braendi_dog::ai::generator::generate_all_legal_actions(&game_clone);
+                                if actions.is_empty() {
+                                    if game_clone.split_rest.is_some() {
+                                        force_undo = true;
+                                    } else {
+                                        force_next = true;
+                                    }
+                                } else {
+                                    let mut gc = game_clone.clone();
+                                    chosen_action = tokio::task::spawn_blocking(move || {
+                                        match player_type {
+                                            PlayerType::RandomBot => braendi_dog::ai::bot::RandomBot::new().choose_action(&mut gc, actions),
+                                            PlayerType::EvalBot => braendi_dog::ai::bot::EvalBot::new().choose_action(&mut gc, actions),
+                                            _ => None,
+                                        }
+                                    }).await.unwrap_or(None);
+                                }
+                                (chosen_action, force_undo, force_next)
+                            },
+                            |(act, fu, fnx)| Message::LocalBotCalculated(act, fu, fnx)
+                        );
+                    }
+                }
+            }
+            
+            Message::LocalBotCalculated(bot_action, force_undo, force_next) => {
+                self.bot_computing = false;
+                
+                let mut do_action_card = None;
+                let mut do_action_act = None;
+                let mut trigger_next = false;
+
+                if let Some(game) = self.game.as_mut() {
+                    if force_undo {
+                        let mut card_to_burn = None;
+                        if let Some(last_entry) = game.history.last() {
+                            card_to_burn = last_entry.action.card;
+                        }
+                        let _ = game.undo_turn();
+                        if let Some(c) = card_to_burn {
+                            let idx = game.current_player_index;
+                            game.players[idx].remove_card(c);
+                            game.discard.push(c);
+                            self.msg = format!("Bot-Loop durchbrochen: Karte {:?} abgeworfen.", c);
+                        }
+                        game.next_player();
+                        trigger_next = true;
+                    } else if force_next {
+                        let idx = game.current_player_index;
+                        if !game.players[idx].cards.is_empty() {
+                            let min_index = game.players[idx].cards.iter()
+                                .enumerate()
+                                .min_by_key(|&(_, c)| c.value())
+                                .map(|(i, _)| i)
+                                .unwrap_or(0);
+                            let card = game.players[idx].cards.remove(min_index);
+                            game.discard.push(card);
+                            self.msg = "Bot muss passen und wirft Karte ab.".to_string();
+                        }
+                        game.next_player();
+                        trigger_next = true;
+                    } else if let Some(action) = bot_action {
+                        do_action_card = Some(action.card.unwrap_or(Card::Joker)); // Fallback falls kein Card-Wert
+                        do_action_act = Some(action);
+                    }
+                }
+
+                if trigger_next {
+                    return Command::perform(async {}, |_| Message::TriggerLocalBot);
+                } else if let (Some(c), Some(act)) = (do_action_card, do_action_act) {
+                    return self.do_action(c, act);
+                }
+
+                if self.client.is_none() { 
+                    if let Some(game) = &self.game {
+                        let current_p = &game.players[game.current_player_index];
+                        if current_p.player_type == PlayerType::Human {
+                            self.local_player_index = Some(game.current_player_index);
+                        }
+                    }
+                }
             }
             Message::StartGame => {
                 return self.update(Message::GoToBotSetup);
@@ -593,12 +764,15 @@ impl Application for DogApp {
                                             }
                                         };
 
+                                        let is_capture = last_entry.beaten_piece_owner.is_some();
+
                                         self.animation = Some(MoveAnimation {
                                             from: from_idx,
                                             to: to_idx,
                                             color: anim_color_iced,
                                             progress: 0.0,
                                             from_zwinger_of_player: from_zwinger,
+                                            is_capture, 
                                         });
                                         self.last_tick = Instant::now();
                                     }
@@ -606,7 +780,6 @@ impl Application for DogApp {
                             }
                         }
 
-                        // Spiel-Status normal übernehmen
                         self.game = Some(new_game);
 
                         if let Some(game) = &self.game {
@@ -643,10 +816,33 @@ impl Application for DogApp {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        let scale = 1.0; 
+
         match self.screen {
             Screen::Start => self.render_start(),
             Screen::BotSetup => self.render_bot_setup(),
-            Screen::Game => self.render_game(),
+            Screen::Game => {
+                let game = match self.game.as_ref() {
+                    Some(g) => g,
+                    None => {
+                        return container(
+                            text("Spiel wird geladen...")
+                                .size(30.0 * scale)
+                                .style(IcedColor::WHITE)
+                        )
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .center_x()
+                        .center_y()
+                        .into();
+                    }
+                };
+                let in_lobby = game.players.iter().any(|p| p.player_type == PlayerType::Human && p.name == "Wartet...");
+                if in_lobby {
+                    return self.make_lobby_screen(game, scale);
+                }
+                self.render_game()
+            }
             Screen::Rules => self.render_rules(),
             Screen::GameOver { winner } => self.render_game_over(winner),
         }
@@ -1410,13 +1606,86 @@ impl DogApp {
         .into()
     }
 
+
+
+    fn make_lobby_screen(&self, game: &Game, scale: f32) -> Element<'_, Message> {
+        let mut content = column![
+            text("Lobby") // <-- Geändert!
+                .size(40.0 * scale)
+                .style(IcedColor::WHITE),
+            text("Warte auf Mitspieler...")
+                .size(20.0 * scale)
+                .style(IcedColor::from_rgb(0.7, 0.7, 0.7)),
+            iced::widget::Space::with_height(30.0 * scale),
+        ]
+        .align_items(iced::Alignment::Center)
+        .spacing(10.0);
+
+        for (i, p) in game.players.iter().enumerate() {
+            
+            // Status-Element zusammenbauen
+            let status_element: Element<Message> = if p.player_type != PlayerType::Human {
+                row![text("Bot (Bereit)").size(20.0 * scale).style(IcedColor::from_rgb(0.8, 0.8, 0.8))].into()
+            } else if p.name == "Wartet..." {
+                row![
+                    text("Warte...").size(20.0 * scale).style(IcedColor::from_rgb(0.8, 0.8, 0.8)),
+                    canvas(HourglassSpinner { angle: self.spinner_angle }).width(Length::Fixed(24.0 * scale)).height(Length::Fixed(24.0 * scale))
+                ].spacing(8.0).align_items(iced::Alignment::Center).into()
+            } else {
+                row![
+                    text("Verbunden").size(20.0 * scale).style(IcedColor::from_rgb(0.8, 0.8, 0.8)),
+                    canvas(Checkmark).width(Length::Fixed(24.0 * scale)).height(Length::Fixed(24.0 * scale)) // <-- Neuer Haken!
+                ].spacing(8.0).align_items(iced::Alignment::Center).into()
+            };
+
+            let name_color = match p.color {
+                GameColor::Red => IcedColor::from_rgb(1.0, 0.4, 0.4),
+                GameColor::Green => IcedColor::from_rgb(0.4, 1.0, 0.4),
+                GameColor::Blue => IcedColor::from_rgb(0.5, 0.7, 1.0),
+                GameColor::Yellow => IcedColor::from_rgb(1.0, 1.0, 0.4),
+                GameColor::Purple => IcedColor::from_rgb(0.8, 0.4, 1.0),
+                GameColor::Orange => IcedColor::from_rgb(1.0, 0.7, 0.3),
+            };
+
+            // NEU: Alles in feste Boxen gesperrt für eine perfekte Ausrichtung!
+            content = content.push(
+                row![
+                    // Slot: Rechtsbündig, feste Breite 80
+                    container(text(format!("Slot {}:", i + 1)).size(24.0 * scale).style(IcedColor::WHITE))
+                        .width(Length::Fixed(80.0 * scale))
+                        .align_x(iced::alignment::Horizontal::Right),
+                    
+                    iced::widget::Space::with_width(Length::Fixed(20.0 * scale)),
+                    
+                    // Name: Linksbündig, feste Breite 180
+                    container(text(&p.name).size(24.0 * scale).style(name_color))
+                        .width(Length::Fixed(180.0 * scale)),
+                    
+                    // Status: Feste Breite 180
+                    container(status_element)
+                        .width(Length::Fixed(180.0 * scale)),
+                ]
+                .align_items(iced::Alignment::Center)
+                .spacing(10.0 * scale)
+            );
+        }
+
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x()
+            .center_y()
+            .style(iced::theme::Container::Custom(Box::new(LobbyBackground))) 
+            .into()
+    }
+
     fn make_sidebar(&self, game: &Game, scale: f32, my_idx: usize) -> Element<'_, Message> {
         let font_std = 16.0 * scale;
         let info = column![
             text(format!("Runde: {}", game.round))
                 .size(font_std)
                 .style(IcedColor::WHITE),
-            text(format!("Du bist: {:?}", game.players[my_idx].color))
+            text(format!("Du bist: {} ({:?})", game.players[my_idx].name, game.players[my_idx].color))
                 .size(font_std)
                 .style(IcedColor::WHITE),
             text(&self.msg)
@@ -1427,7 +1696,6 @@ impl DogApp {
 
         let mut btns = column![].spacing(8.0 * scale);
 
-        // FIX: Schalte alle Buttons aus, wenn wir nicht am Zug sind!
         let is_my_turn = my_idx == game.current_player_index;
 
         if !is_my_turn {
@@ -1589,6 +1857,10 @@ impl DogApp {
 
     fn handle_btn_click(&mut self, action_type: GameAction) -> Command<Message> {
         let game = self.game.as_ref().unwrap();
+        if self.client.is_none() && game.players[game.current_player_index].player_type != PlayerType::Human {
+            self.msg = "Der Bot rechnet gerade...".into();
+            return Command::none();
+        }
         let my_idx = self.local_player_index.unwrap_or(game.current_player_index);
 
         if my_idx != game.current_player_index {
@@ -1596,7 +1868,6 @@ impl DogApp {
             return Command::none();
         }
 
-        // NEU: Sonderbehandlung für Undo (benötigt keine ausgewählte Karte!)
         if matches!(action_type, GameAction::Undo) {
             let play_str = "undo".to_string();
             self.selected_card = None;
@@ -1623,7 +1894,6 @@ impl DogApp {
             }
         }
 
-        // Ab hier geht der Code weiter für Aktionen, die zwingend eine Karte erfordern
         if self.selected_card.is_none() {
             self.msg = "Erst Karte wählen!".into();
             return Command::none();
@@ -1843,17 +2113,32 @@ impl DogApp {
                 match game.action(action.card, action) {
                     Ok(_) => {
                         if is_move {
+                            let is_capture = game.history.last().map_or(false, |e| e.beaten_piece_owner.is_some());
+                            
                             self.animation = Some(MoveAnimation {
                                 from: from_idx,
                                 to: to_idx,
                                 color: anim_color_iced,
                                 progress: 0.0,
                                 from_zwinger_of_player: from_zwinger,
+                                is_capture,
                             });
                             self.last_tick = Instant::now();
+                        } else {
+                            if self.client.is_none() && !game.is_winner() {
+                                return Command::perform(async {}, |_| Message::TriggerLocalBot);
+                            }
                         }
+                        
                         if game.is_winner() {
-                            self.trigger_win(current_color_enum);
+                            let mut winner_color = current_color_enum;
+                            for p in &game.players {
+                                if p.pieces_in_house == 4 {
+                                    winner_color = p.color;
+                                    break;
+                                }
+                            }
+                            self.trigger_win(winner_color);
                         }
                     }
                     Err(e) => self.msg = format!("Fehler: {}", e),
@@ -1988,7 +2273,6 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
         let total_tiles = ring_size + total_players * 4;
         let scale = bounds.width.min(bounds.height) / 850.0;
 
-        // FIX: Brett dreht sich jetzt immer passend zu deiner EIGENEN Farbe!
         let my_angle = (self.my_idx as f32 * 16.0 / ring_size as f32) * std::f32::consts::TAU;
         let rotation = std::f32::consts::FRAC_PI_2 - my_angle;
         let board_radius = 340.0 * scale;
@@ -2010,18 +2294,54 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
 
        for offset in 1..total_players {
             let opponent_idx = (self.my_idx + offset) % total_players;
-            let card_count = self.game.players[opponent_idx].cards.len();
+            let opponent = &self.game.players[opponent_idx];
+            let card_count = opponent.cards.len();
             let cw = 30.0 * scale;
             let ch = 45.0 * scale;
-            let card_orbit_radius = board_radius + (ch / 2.0) + (20.0 * scale); 
+            
             let angle_step = std::f32::consts::TAU / (total_players as f32);
-            let card_angle = std::f32::consts::FRAC_PI_2 - (offset as f32 * angle_step);
+            let card_angle = std::f32::consts::FRAC_PI_2 + (offset as f32 * angle_step);
+            
+            let card_orbit_radius = board_radius + (ch / 2.0) + (10.0 * scale); 
             let center_card_pos = Point::new(
                 center.x + card_orbit_radius * card_angle.cos(),
                 center.y + card_orbit_radius * card_angle.sin(),
             );
+            
             let is_horizontal = card_angle.cos().abs() < 0.5;
             
+            let name_radius = card_orbit_radius + 40.0 * scale; 
+            let name_pos = Point::new(
+                center.x + name_radius * card_angle.cos(),
+                center.y + name_radius * card_angle.sin(),
+            );
+            
+            let name_color = match opponent.color {
+                GameColor::Red => IcedColor::from_rgb(1.0, 0.4, 0.4),
+                GameColor::Green => IcedColor::from_rgb(0.4, 1.0, 0.4),
+                GameColor::Blue => IcedColor::from_rgb(0.5, 0.7, 1.0),
+                GameColor::Yellow => IcedColor::from_rgb(1.0, 1.0, 0.4),
+                GameColor::Purple => IcedColor::from_rgb(0.8, 0.4, 1.0),
+                GameColor::Orange => IcedColor::from_rgb(1.0, 0.7, 0.3),
+            };
+
+            frame.with_save(|frame| {
+                frame.translate(iced::Vector::new(name_pos.x, name_pos.y));
+                
+                let text_rotation = card_angle - std::f32::consts::FRAC_PI_2;
+                frame.rotate(text_rotation);
+                
+                frame.fill_text(canvas::Text {
+                    content: opponent.name.clone(),
+                    position: Point::new(0.0, 0.0), 
+                    color: name_color,
+                    size: (16.0 * scale).into(),
+                    horizontal_alignment: iced::alignment::Horizontal::Center,
+                    vertical_alignment: iced::alignment::Vertical::Center,
+                    ..Default::default()
+                });
+            });
+
             if card_count > 0 {
                 for c in 0..card_count {
                     let spread = 15.0 * scale;
@@ -2283,7 +2603,7 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
                 get_tile_position(anim.from, total_players, center, scale, rotation)
             };
             let p2 = get_tile_position(anim.to, total_players, center, scale, rotation);
-            let mut x = p1.x + (p2.x - p1.x) * anim.progress;
+            let  x = p1.x + (p2.x - p1.x) * anim.progress;
             let mut y = p1.y + (p2.y - p1.y) * anim.progress;
             let hop = (1.0 - (2.0 * anim.progress - 1.0).powi(2)) * 80.0 * scale;
             y -= hop;
@@ -2464,7 +2784,6 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
     let center = rect.center();
     let w = rect.width;
 
-    // Erweiterte Farbpalette für mehr Details
     let haut = IcedColor::from_rgb(0.98, 0.88, 0.75);
     let gold = IcedColor::from_rgb(1.0, 0.8, 0.0);
     let blond = IcedColor::from_rgb(0.95, 0.85, 0.3);
@@ -2646,29 +2965,53 @@ fn draw_card_art(frame: &mut canvas::Frame, card: Card, rect: iced::Rectangle, c
                 canvas::Stroke::default().with_width(2.0).with_color(rot),
             );
         }
-        Card::Four => {
+       Card::Four => {
             frame.stroke(
                 &canvas::Path::new(|p| {
-                    let sz = 15.0;
-                    p.move_to(Point::new(center.x + sz, center.y));
-                    p.line_to(Point::new(center.x - sz + 5.0, center.y));
-                    p.move_to(Point::new(center.x - sz + 10.0, center.y - 8.0));
-                    p.line_to(Point::new(center.x - sz, center.y));
-                    p.line_to(Point::new(center.x - sz + 10.0, center.y + 8.0));
+                    let sz = 12.0;
+                    p.move_to(Point::new(center.x - sz, center.y));
+                    p.line_to(Point::new(center.x + sz, center.y));
+                    
+                    p.move_to(Point::new(center.x + sz - 8.0, center.y - 8.0));
+                    p.line_to(Point::new(center.x + sz, center.y));
+                    p.line_to(Point::new(center.x + sz - 8.0, center.y + 8.0));
                 }),
                 canvas::Stroke::default().with_color(color).with_width(4.0),
             );
         }
-        Card::Seven => {
-            frame.stroke(
-                &canvas::Path::new(|p| {
-                    p.move_to(Point::new(center.x - 10.0, center.y + 15.0));
-                    p.line_to(Point::new(center.x + 10.0, center.y - 15.0));
-                    p.move_to(Point::new(center.x + 10.0, center.y + 15.0));
-                    p.line_to(Point::new(center.x - 10.0, center.y - 15.0));
-                }),
-                canvas::Stroke::default().with_color(color).with_width(3.0),
-            );
+       Card::Seven => {
+            let size = w * 0.35; 
+            let handle_radius = size * 0.25;
+            let blade_length = size * 0.7;
+            let offset_x = size * 0.08;
+            let scissor_color = color;
+            
+            let stroke_style = canvas::Stroke::default()
+                .with_color(scissor_color)
+                .with_width(2.5); 
+
+            frame.with_save(|frame| {
+                frame.translate(iced::Vector::new(center.x, center.y));
+                
+                frame.rotate(-std::f32::consts::FRAC_PI_4);
+                
+                let left_half = canvas::Path::new(|p| {
+                    p.circle(Point::new(-offset_x, blade_length * 0.4), handle_radius);
+                    p.move_to(Point::new(-offset_x, blade_length * 0.4 - handle_radius));
+                    p.line_to(Point::new(-offset_x, -blade_length));
+                });
+                frame.stroke(&left_half, stroke_style.clone());
+
+                let right_half = canvas::Path::new(|p| {
+                    p.circle(Point::new(offset_x, blade_length * 0.4), handle_radius);
+                    p.move_to(Point::new(offset_x, blade_length * 0.4 - handle_radius));
+                    p.line_to(Point::new(offset_x, -blade_length));
+                });
+                frame.stroke(&right_half, stroke_style.clone());
+
+                let pivot = canvas::Path::circle(Point::new(0.0, -offset_x), stroke_style.width * 1.2);
+                frame.fill(&pivot, scissor_color);
+            });
         }
         Card::Ace => {
             frame.fill_text(canvas::Text {
@@ -2738,4 +3081,119 @@ fn draw_marble(frame: &mut canvas::Frame, center: Point, color: IcedColor, scale
         ),
         IcedColor::from_rgba(1.0, 1.0, 1.0, 0.4),
     );
+}
+
+fn play_sfx(filename: &'static str, volume: f32) {
+    std::thread::spawn(move || {
+        if let Ok((_stream, stream_handle)) = OutputStream::try_default() {
+            if let Ok(file) = File::open(filename) {
+                let reader = BufReader::new(file);
+                if let Ok(source) = Decoder::new(reader) {
+                    if let Ok(sink) = Sink::try_new(&stream_handle) {
+                        sink.set_volume(volume);
+                        sink.append(source);
+                        sink.sleep_until_end(); 
+                    }
+                }
+            }
+        }
+    });
+}
+
+struct LobbyBackground;
+impl iced::widget::container::StyleSheet for LobbyBackground {
+    type Style = iced::Theme;
+    fn appearance(&self, _style: &Self::Style) -> iced::widget::container::Appearance {
+        iced::widget::container::Appearance {
+            background: Some(iced::Background::Color(IcedColor::from_rgb(0.12, 0.31, 0.21))), 
+            ..Default::default()
+        }
+    }
+}
+
+struct HourglassSpinner {
+    angle: f32,
+}
+
+impl canvas::Program<Message> for HourglassSpinner {
+    type State = ();
+
+    // NEU: Die Parameter genau so angeben, wie die neue Iced-Version es verlangt!
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &iced::Renderer, // <-- Neu
+        _theme: &iced::Theme,      // <-- Neu
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor, // <-- Geändert
+    ) -> Vec<canvas::Geometry> {
+        
+        // NEU: Frame::new braucht jetzt auch den renderer als erstes Argument
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        
+        let center = frame.center();
+        let size = bounds.width.min(bounds.height) * 0.8; 
+        let half = size / 2.0;
+
+        frame.with_save(|frame| {
+            frame.translate(iced::Vector::new(center.x, center.y));
+            frame.rotate(self.angle);
+
+            let path = canvas::Path::new(|p| {
+                p.move_to(Point::new(-half, -half));
+                p.line_to(Point::new(half, -half));
+                p.line_to(Point::new(-half, half));
+                p.line_to(Point::new(half, half));
+                p.close();
+            });
+
+            frame.fill(&path, IcedColor::from_rgb(0.8, 0.7, 0.5)); 
+            frame.stroke(
+                &path,
+                canvas::Stroke::default()
+                    .with_color(IcedColor::BLACK)
+                    .with_width(1.5),
+            );
+        });
+
+        vec![frame.into_geometry()]
+    }
+}
+
+struct Checkmark;
+
+impl canvas::Program<Message> for Checkmark {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &iced::Renderer,
+        _theme: &iced::Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let center = frame.center();
+        let size = bounds.width.min(bounds.height);
+
+        frame.translate(iced::Vector::new(center.x, center.y));
+
+        let path = canvas::Path::new(|p| {
+            p.move_to(Point::new(-size * 0.3, 0.0));
+            p.line_to(Point::new(-size * 0.1, size * 0.3));
+            p.line_to(Point::new(size * 0.4, -size * 0.4));
+        });
+
+        frame.stroke(
+            &path,
+            canvas::Stroke::default()
+                .with_color(IcedColor::BLACK)
+                .with_width(3.0)
+                .with_line_cap(canvas::LineCap::Round)
+                .with_line_join(canvas::LineJoin::Round),
+        );
+
+        vec![frame.into_geometry()]
+    }
 }
