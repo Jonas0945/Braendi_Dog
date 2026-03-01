@@ -12,6 +12,7 @@ use crate::ai::bot::{RandomBot, EvalBot, Bot};
 use tokio::net::tcp::OwnedWriteHalf;
 
 type ClientID = usize;
+const BOT_CLIENT_ID_BASE: usize = usize::MAX / 2;
 
 pub struct GameServer {
     pub game: Arc<Mutex<Option<Game>>>,
@@ -89,29 +90,42 @@ impl GameServer {
                                         if game_guard.is_none() {
                                             let mut new_game = Game::new(variant, player_types);
                                             new_game.new_round();
-                                            
-                                            if let Some(p) = new_game.players.get_mut(0) {
-                                                p.name = player_name.clone();
-                                            }
-
+                                    
                                             *game_guard = Some(new_game);
 
-                                            if let Some(player_0) = game_guard.as_ref().unwrap().players.get(0) {
-                                                inner_client_to_index_ref
-                                                    .lock()
-                                                    .unwrap()
-                                                    .insert(netzwerk_id, player_0.color);
+                                            let game = game_guard.as_mut().unwrap();
+                                            let mut human_slot_assigned = false;
+                                            for (i, player) in game.players.iter_mut().enumerate() {
+                                                match player.player_type {
+                                                    PlayerType::Human => {
+                                                        if !human_slot_assigned {
+                                                            player.name = player_name.clone();  // ersetzt den get_mut(0)-Block
+                                                            inner_client_to_index_ref
+                                                                .lock().unwrap()
+                                                                .insert(netzwerk_id, player.color);
+                                                            human_slot_assigned = true;
+                                                        } else {
+                                                            player.name = "Wartet...".to_string(); // ← neu
+                                                        }
+                                                    }
+                                                    PlayerType::RandomBot | PlayerType::EvalBot => {
+                                                        inner_client_to_index_ref
+                                                            .lock().unwrap()
+                                                            .insert(BOT_CLIENT_ID_BASE + i, player.color);
+                                                    }
+                                                }
                                             }
+                                    
                                             println!("Spiel wurde von {} erstellt.", player_name);
                                         } else {
                                             println!("Fehler: das Spiel läuft schon");
                                             return;
                                         }
-
+                                    
                                         let msg1 = serde_json::to_string(&ServerNachrich::Welcome(0)).unwrap() + "\n";
                                         let game_clone = game_guard.as_ref().unwrap().clone();
                                         let msg2 = serde_json::to_string(&ServerNachrich::State(game_clone)).unwrap() + "\n";
-                                        
+                                    
                                         (Some(msg1 + &msg2), None)
                                     }
                                     BeginGameMesage::SpielBeitreten { player_name } => {
