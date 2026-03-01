@@ -2,10 +2,15 @@ use crate::game::game::GameVariant;
 use crate::game::Game;
 use crate::game::board_view::collect_board_pieces;
 
+/// Comments by Sebastian Servos
+/// This module defines the evaluation logic for the EvalBot. 
+/// It includes the EvalFeature enum, which represents different aspects of the game state that can be evaluated (e.g. progress towards winning, mobility, risk). 
+/// Each feature has a method to evaluate its score based on the current game state and the bot's perspective. 
+/// The Evaluator struct combines multiple features to assign an overall score to a game state from the perspective of a player. 
+/// The score is used by EvalBot to choose the best action during its turn. 
+/// The module also includes helper functions to determine if pieces have legal moves and if they are under threat from opponents.
 
 pub type Score = i32;
-
-
 
 fn piece_has_any_move(game: &Game, from: usize, owner: usize) -> bool {
     for card in &game.players[owner].cards {
@@ -29,6 +34,8 @@ fn piece_has_any_move(game: &Game, from: usize, owner: usize) -> bool {
     false
 }
 
+// Forward threat: opponent can reach target within 13 tiles
+// Backward threat: opponent can reach target exactly 4 tiles back
 fn is_threat(game: &Game, opponent_position: usize, opponent_index: usize, target_position:usize, target_index: usize) -> bool {
     let board = &game.board;
 
@@ -73,68 +80,20 @@ fn is_threat(game: &Game, opponent_position: usize, opponent_index: usize, targe
     false
 }
 
-/*fn is_protected(game: &Game, player_position: usize, player_index: usize) -> bool {
-    let board = &game.board;
-
-    if player_position >= board.ring_size {
-        return true;
-    }
-
-    let Some(player_piece) = board.tiles[player_position].as_ref() else {
-        return false;
-    };
-
-    if !player_piece.left_start {
-        return true;
-    }
-
-    for (opponent_position, opponent_tile) in board.tiles.iter().enumerate() {
-        let Some(opponent_piece) = opponent_tile else { continue };
-
-        let opponent_index = opponent_piece.owner;
-
-        if opponent_index == player_index || game.teammate_indices(player_index).contains(&opponent_index) {
-            continue;
-        }
-
-
-        // Check all forward moves
-        if let Some(forward_distance) = board.distance_between(opponent_position, player_position, opponent_index) {
-            if forward_distance <= 13 {
-                if let Some(forward_path) = board.passed_tiles(opponent_position, player_position, opponent_index, false) {
-                    if board.is_path_free(&forward_path) {
-                        return false;
-                    }
-                }
-            }
-        }
-
-        // Check all backward moves
-        if let Some(backward_distance) = board.distance_between(player_position, opponent_position, player_index) {
-            if backward_distance == 4 {
-                if let Some(backward_path) = board.passed_tiles(opponent_position, player_position, opponent_index, true) {
-                    if board.is_path_free(&backward_path) {
-                        return false;
-                    }
-                }
-            }
-        }      
-    }
-
-    true
-}*/
-
+// Perspective for evaluation: which player is the bot, who are the teammates and who are the opponents.
 pub struct EvalPerspective {
     pub player_index: usize,
     pub partner_indices: Vec<usize>,
     pub opponent_indices: Vec<usize>,
 }
 
+// Context for evaluation: the game state and the perspective.
 pub struct EvalContext<'a> {
     pub game: &'a Game,
     pub perspective: EvalPerspective,
 }
 
+// Aspect of the evaluation that assigns a score to a game state from the perspective of a player.
 enum EvalFeature {
     HouseProgress,  // Evaluates current pieces_in_house
     HouseMobility,  // Evaluates if pieces can enter/move in house
@@ -372,6 +331,7 @@ impl EvalFeature {
     }
 }
 
+// Evaluator that combines multiple features to assign a score to a game state from the perspective of a player.
 pub struct Evaluator {
     features: Vec<EvalFeature>,
 }
