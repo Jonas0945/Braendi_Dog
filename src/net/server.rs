@@ -4,8 +4,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+//use crate::{BeginGameMesage, Game, DogGame, game::player::{Player, PlayerType}};
 
-use crate::{BeginGameMesage, Game, DogGame, game::player::{Player, PlayerType}};
+use crate::{BeginGameMesage, Game, DogGame, game::player::{ PlayerType}};
 use crate::ai::generator::generate_all_legal_actions;
 use crate::ai::bot::{RandomBot, EvalBot, Bot};
 use tokio::net::tcp::OwnedWriteHalf;
@@ -80,23 +81,22 @@ impl GameServer {
                                     }
                                 };
 
-                            let maybe_state_msg: Option<String> = {
+                            let (maybe_state_msg, maybe_broadcast_state) = {
                                 let mut game_guard = inner_game_ref.lock().unwrap();
 
                                 match hello_message {
-                                    BeginGameMesage::ErstelleSpiel {
-                                        variant,
-                                        player_name,
-                                        player_types,
-                                    } => {
+                                    BeginGameMesage::ErstelleSpiel { variant, player_name, player_types } => {
                                         if game_guard.is_none() {
                                             let mut new_game = Game::new(variant, player_types);
                                             new_game.new_round();
+                                            
+                                            if let Some(p) = new_game.players.get_mut(0) {
+                                                p.name = player_name.clone();
+                                            }
+
                                             *game_guard = Some(new_game);
 
-                                            if let Some(player_0) =
-                                                game_guard.as_ref().unwrap().players.get(0)
-                                            {
+                                            if let Some(player_0) = game_guard.as_ref().unwrap().players.get(0) {
                                                 inner_client_to_index_ref
                                                     .lock()
                                                     .unwrap()
@@ -108,70 +108,59 @@ impl GameServer {
                                             return;
                                         }
 
-                                        let msg1 =
-                                            serde_json::to_string(&ServerNachrich::Welcome(0))
-                                                .unwrap()
-                                                + "\n";
+                                        let msg1 = serde_json::to_string(&ServerNachrich::Welcome(0)).unwrap() + "\n";
                                         let game_clone = game_guard.as_ref().unwrap().clone();
-                                        let msg2 = serde_json::to_string(&ServerNachrich::State(
-                                            game_clone,
-                                        ))
-                                        .unwrap()
-                                            + "\n";
-                                        Some(msg1 + &msg2)
+                                        let msg2 = serde_json::to_string(&ServerNachrich::State(game_clone)).unwrap() + "\n";
+                                        
+                                        (Some(msg1 + &msg2), None)
                                     }
                                     BeginGameMesage::SpielBeitreten { player_name } => {
-                                        if let Some(game) = game_guard.as_ref() {
-                                            let max_allowed = game.players.len();
-                                            let used_colors: Vec<_> = inner_client_to_index_ref
-                                                .lock()
-                                                .unwrap()
-                                                .values()
-                                                .cloned()
-                                                .collect();
-                                            let free_slot = (0..max_allowed).find(|&i| {
-                                                !used_colors.contains(&game.players[i].color)
+                                        if let Some(game) = game_guard.as_mut() {
+                                            let free_slot = game.players.iter().position(|p| {
+                                                p.player_type == PlayerType::Human && p.name == "Wartet..."
                                             });
 
                                             if let Some(slot) = free_slot {
+                                                game.players[slot].name = player_name.clone(); 
+                                                
                                                 let player = game.players[slot].clone();
                                                 inner_client_to_index_ref
                                                     .lock()
                                                     .unwrap()
                                                     .insert(netzwerk_id, player.color);
-                                                println!(
-                                                    "Client '{}' hat sich angemeldet als Slot {}",
-                                                    player_name, slot
-                                                );
+                                                println!("Client '{}' hat sich angemeldet als Slot {}", player_name, slot);
 
-                                                let msg1 = serde_json::to_string(
-                                                    &ServerNachrich::Welcome(slot),
-                                                )
-                                                .unwrap()
-                                                    + "\n";
+                                                let msg1 = serde_json::to_string(&ServerNachrich::Welcome(slot)).unwrap() + "\n";
                                                 let game_clone = game.clone();
-                                                let msg2 = serde_json::to_string(
-                                                    &ServerNachrich::State(game_clone),
-                                                )
-                                                .unwrap()
-                                                    + "\n";
-                                                Some(msg1 + &msg2)
+                                                let msg2 = serde_json::to_string(&ServerNachrich::State(game_clone.clone())).unwrap() + "\n";
+                                                
+                                                (Some(msg1 + &msg2), Some(game_clone))
                                             } else {
-                                                println!("Kein freier Platz mehr.");
-                                                None
+                                                println!("Kein freier Human-Slot mehr in der Lobby.");
+                                                (None, None)
                                             }
                                         } else {
                                             println!("Kein Spiel vorhanden.");
-                                            None
+                                            (None, None)
                                         }
                                     }
                                 }
-                            };
+                            }; 
+
+
+                            
+                            if let Some(state) = maybe_broadcast_state {
+                                let state_str = serde_json::to_string(&ServerNachrich::State(state)).unwrap() + "\n";
+                                let mut clients_guard = inner_clients_ref.lock().await;
+                                for (id, writer) in clients_guard.iter_mut() {
+                                    if *id != netzwerk_id {
+                                        let _ = writer.write_all(state_str.as_bytes()).await;
+                                    }
+                                }
+                            }
 
                             if let Some(state_msg) = maybe_state_msg {
-                                if let Some(writer) =
-                                    inner_clients_ref.lock().await.get_mut(&netzwerk_id)
-                                {
+                                if let Some(writer) = inner_clients_ref.lock().await.get_mut(&netzwerk_id) {
                                     if let Err(e) = writer.write_all(state_msg.as_bytes()).await {
                                         println!("Fehler beim Senden: {}", e);
                                     }
@@ -241,7 +230,7 @@ impl GameServer {
                                     match game.play(&actionsstr) {
                                         Ok(()) => {
                                             state_changed = true;
-                                            human_played_this_tick = true; // Mensch hat erfolgreich gezogen!
+                                            human_played_this_tick = true; 
                                         }
                                         Err(e) => {
                                             let err_json = serde_json::to_string(
@@ -419,8 +408,8 @@ impl GameServer {
 }
 
 
-async fn broadcast(clients: &mut HashMap<ClientID, OwnedWriteHalf>, message: &str) {
-    for writer in clients.values_mut() {
-        let _ = writer.write_all(message.as_bytes()).await;
-    }
-}
+//    async fn broadcast(clients: &mut HashMap<ClientID, OwnedWriteHalf>, message: &str) {
+ //     for writer in clients.values_mut() {
+//        let _ = writer.write_all(message.as_bytes()).await;
+//    }
+//}
