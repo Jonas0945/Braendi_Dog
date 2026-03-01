@@ -422,8 +422,4 @@ impl GameServer {
 }
 
 
-//    async fn broadcast(clients: &mut HashMap<ClientID, OwnedWriteHalf>, message: &str) {
- //     for writer in clients.values_mut() {
-//        let _ = writer.write_all(message.as_bytes()).await;
-//    }
-//}
+
