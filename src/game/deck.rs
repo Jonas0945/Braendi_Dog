@@ -1,8 +1,10 @@
-use rand::rng;
 use rand::seq::SliceRandom;
-use serde::{Deserialize, Serialize};
-
+use rand::rng;
+use serde::{Serialize, Deserialize};
 use super::card::Card;
+
+/// Comments by Sebastian Servos
+/// This module defines the Deck struct, which represents a deck of cards used in the game.
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Deck {

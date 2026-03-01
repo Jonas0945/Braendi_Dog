@@ -1,5 +1,8 @@
 use crate::game::Game;
 
+/// Comments by Sebastian Servos
+/// This module defines the BoardPieceInfo struct and the collect_board_pieces function, which are used to gather information about the pieces currently on the board.
+
 #[derive(Clone, Copy, Debug)]
 pub struct BoardPieceInfo {
     pub position: usize,

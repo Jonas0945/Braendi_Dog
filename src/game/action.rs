@@ -5,6 +5,9 @@ use super::board::Point;
 use super::card::Card;
 use super::color::Color;
 
+/// Comments by Sebastian Servos
+/// This module defines the Action struct and ActionKind enum, which represent the different types of actions that players can take in the game.
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Action {
     pub player: Color,
@@ -12,6 +15,7 @@ pub struct Action {
     pub action: ActionKind,
 }
 
+/// Represents the different types of actions that can be performed in the game, along with their specific parameters.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum ActionKind {
     Place {

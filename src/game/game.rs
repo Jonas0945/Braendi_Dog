@@ -1,18 +1,23 @@
 use serde::Deserialize;
 use serde::Serialize;
 
+use super::piece::*;
 use super::action::*;
 use super::board::*;
 use super::card::*;
 use super::color::*;
 use super::deck::*;
 use super::history::*;
-use super::piece::*;
-//use super::piece::*;
 use super::player::*;
+
+/// Comments by Sebastian Servos
+/// This module defines the Game struct, which represents the overall state of the game, including the board, players, deck, discard pile, and game history. 
+/// It also includes methods for initializing new games, performing actions, and checking game rules and conditions. 
+/// The Game struct serves as the central point for managing the game state and logic.
 
 const CARDS_PER_ROUND: [u8; 5] = [6, 5, 4, 3, 2];
 
+// Represents the different game variants, which determine the number of players and team configurations.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum GameVariant {
     TwoVsTwo,
@@ -234,7 +239,6 @@ impl Game {
         let distances = _card.possible_distances();
 
         let forward_ok = forward.map_or(false, |f| distances.contains(&f));
-        // FIX 2: Rückwärts NUR mit 4 Feldern und erlaubten Karten
         let backward_ok = backward.map_or(false, |b| _card.allows_backward_move() && b == 4);
 
         forward_ok || backward_ok
@@ -309,19 +313,13 @@ impl Game {
 
     // Return first teammate that is not the player himself
     pub fn teammate_index(&self, player_index: usize) -> Option<usize> {
-        let teams = self.teams.as_ref()?;
-
-        for team in teams {
-            if let Some(pos) = team.iter().position(|&i| i == player_index) {
-                if team.len() <= 1 {
-                    return None;
+        if let Some(teams) = &self.teams {
+            for team in teams {
+                if team.contains(&player_index) {
+                    return team.iter().find(|&&i| i != player_index).copied();
                 }
-
-                let next_pos = (pos + 1) % team.len();
-                return Some(team[next_pos]);
             }
         }
-
         None
     }
 
@@ -371,6 +369,7 @@ impl Game {
         false
     }
 
+    // Checks if a given card can be played by the current player, considering the game state and rules for placing pieces, moving pieces, splitting, and interchanging.
     fn is_card_playable(&self, card: Card) -> bool {
         let current_player_index = self.current_player_index;
         let controllable_player_indices = self.controllable_player_indices(current_player_index);
@@ -439,21 +438,6 @@ impl Game {
 
         false
     }
-
-    //fn find_team_pieces(&self, player_index: usize) -> Vec<usize> {
-    //     let controllable_player_indices = self.controllable_player_indices(player_index);
-    //   let mut positions = Vec::new();
-
-    // for (index, tile) in self.board.tiles.iter().enumerate() {
-    //   if let Some(piece) = tile {
-    //       if controllable_player_indices.contains(&piece.owner) {
-    //              positions.push(index);
-    ///         }
-    //     }
-    //   }
-
-    //  positions
-    // }
 
     fn find_movable_pieces(&self, player_index: usize) -> Vec<usize> {
         let controllable_player_indices = self.controllable_player_indices(player_index);
@@ -535,7 +519,9 @@ impl Game {
         }
     }
 
-    fn action_place(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
+    // Handles the logic for performing a "Place" action.
+    fn action_place(&mut self, player_index: usize, _action:Action) -> Result<(), &'static str> {
+
         let ActionKind::Place { target_player } = _action.action else {
             return Err("Invalid action for place");
         };
@@ -607,7 +593,9 @@ impl Game {
         Ok(())
     }
 
-    fn action_move(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
+    // Handles the logic for performing a "Move" action.
+    fn action_move(& mut self, player_index: usize, _action:Action) -> Result<(), &'static str> {
+
         let ActionKind::Move { from, to } = _action.action else {
             return Err("Invalid action for move");
         };
@@ -717,11 +705,9 @@ impl Game {
         Ok(())
     }
 
-    fn action_interchange(
-        &mut self,
-        player_index: usize,
-        _action: Action,
-    ) -> Result<(), &'static str> {
+    // Handles the logic for performing an "Interchange" action.
+    fn action_interchange(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
+        
         let ActionKind::Interchange { a, b } = _action.action else {
             return Err("Invalid action for interchange");
         };
@@ -798,6 +784,7 @@ impl Game {
         Ok(())
     }
 
+    // Handles the logic for performing a "Trade" action.
     fn action_trade(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
         if !matches!(_action.action, ActionKind::Trade) {
             return Err("Invalid action for trade");
@@ -839,9 +826,8 @@ impl Game {
             .teammate_index(player_index)
             .ok_or("Trade: teammate not found")?;
 
-        self.trade_buffer
-            .push((player_index, teammate_index, removed_card));
-
+        self.trade_buffer.push((player_index, teammate_index, removed_card));
+        
         if self.trade_buffer.len() == self.players.len() {
             let trades: Vec<_> = self.trade_buffer.drain(..).collect();
 
@@ -876,11 +862,9 @@ impl Game {
         Ok(())
     }
 
-    fn action_trade_grab(
-        &mut self,
-        player_index: usize,
-        _action: Action,
-    ) -> Result<(), &'static str> {
+    // Handles the logic for performing a "Trade Grab" action.
+    fn action_trade_grab(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
+
         let ActionKind::TradeGrab { target_card } = _action.action else {
             return Err("Invalid action for trade grab");
         };
@@ -962,6 +946,7 @@ impl Game {
         Ok(())
     }
 
+    // Handles the logic for performing a "Split" action.
     fn action_split(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
         match _action.card {
             Some(Card::Seven) | Some(Card::Joker) => {}
@@ -1149,6 +1134,7 @@ impl Game {
         Ok(())
     }
 
+    // Handles the logic for performing a "Remove" action.
     fn action_remove(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
         if self.check_if_any_action_possible() {
             return Err("Cannot remove: other action possible.");
@@ -1192,6 +1178,7 @@ impl Game {
         Ok(())
     }
 
+    // Handles the logic for performing a "Grab" action.
     fn action_grab(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
         let card = _action.card.ok_or("Grab action requires a card.")?;
 
@@ -1298,6 +1285,7 @@ impl DogGame for Game {
         &self.board.get_board()
     }
 
+    // Main function to perform an action, which includes validation of the action based on the current game state and rules, and then delegates to specific action handlers for each type of action.
     fn action(&mut self, card: Option<Card>, _action: Action) -> Result<(), &'static str> {
         if self.current_player().color != _action.player {
             return Err("It's not his player's turn.");
@@ -1386,6 +1374,8 @@ impl DogGame for Game {
         Ok(())
     }
 
+    /// Undoes the last action performed in the game, restoring the game state to what it was before that action was taken. 
+    /// This includes reversing any changes made to the board, player hands, and other relevant game state based on the type of action that was undone.
     fn undo_action(&mut self) -> Result<(), &'static str> {
         let entry = self.history.pop().ok_or("No action to undo")?;
 
@@ -1630,6 +1620,7 @@ impl DogGame for Game {
         Ok(())
     }
 
+    // Undoes the last turn, which may consist of multiple actions in case of multi-step splits or the trading phase. 
     fn undo_turn(&mut self) -> Result<(), &'static str> {
         if self.history.is_empty() {
             return Err("Nothing to undo");
@@ -1668,6 +1659,7 @@ impl DogGame for Game {
         Ok(())
     }
 
+    // Undoes a sequence of turns, used for undoing multiple turns at once (e.g. in case of take-backs in multiplayer games).
     fn undo_sequence(&mut self, turns: usize) -> Result<(), &'static str> {
         for _ in 0..turns {
             self.undo_turn()?;

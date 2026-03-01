@@ -2,6 +2,10 @@ use super::card::Card;
 use super::color::Color;
 use serde::{Deserialize, Serialize};
 
+/// Comments by Sebastian Servos
+/// This module defines the Player struct, which represents a player in the game.
+/// Each player has a type (human or bot) described by the PlayerType enum.
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum PlayerType {
     Human,
