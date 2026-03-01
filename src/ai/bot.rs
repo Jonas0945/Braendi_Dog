@@ -1,18 +1,18 @@
-use rand::seq::SliceRandom;
-use rand::rngs::ThreadRng;
 use rand::rng;
+use rand::rngs::ThreadRng;
+use rand::seq::SliceRandom;
 
-use crate::game::action::ActionKind;
-use crate::game::game::{Game, DogGame};
 use crate::Action;
-use crate::ai::evaluator::{Evaluator, EvalContext, EvalPerspective, Score};
+use crate::ai::evaluator::{EvalContext, EvalPerspective, Evaluator, Score};
 use crate::ai::generator::*;
+use crate::game::action::ActionKind;
+use crate::game::game::{DogGame, Game};
 
 /// Comments by Sebastian Servos
-/// This module defines the Bot trait and two implementations: RandomBot and EvalBot. 
-/// The Bot trait has a method choose_action that takes the current game state and a list of legal actions, and returns the chosen action. 
-/// RandomBot simply selects a random action from the list, while EvalBot simulates each possible action, evaluates the resulting game state using a heuristic evaluator, and selects the action with the highest score. 
-/// EvalBot also handles the trading phase by simulating partner actions for each traded card. 
+/// This module defines the Bot trait and two implementations: RandomBot and EvalBot.
+/// The Bot trait has a method choose_action that takes the current game state and a list of legal actions, and returns the chosen action.
+/// RandomBot simply selects a random action from the list, while EvalBot simulates each possible action, evaluates the resulting game state using a heuristic evaluator, and selects the action with the highest score.
+/// EvalBot also handles the trading phase by simulating partner actions for each traded card.
 /// If no action can be chosen (e.g. all simulations fail), it falls back to selecting the first available action.
 
 pub trait Bot {
@@ -22,19 +22,15 @@ pub trait Bot {
     fn choose_action(&mut self, game: &mut Game, actions: Vec<Action>) -> Option<Action>;
 }
 
-
 pub struct RandomBot {
     rng: ThreadRng,
 }
 
 impl RandomBot {
     pub fn new() -> Self {
-        Self { 
-            rng: rng(),
-        }
+        Self { rng: rng() }
     }
 }
-
 
 impl Bot for RandomBot {
     fn new() -> Self {
@@ -42,7 +38,6 @@ impl Bot for RandomBot {
     }
 
     fn choose_action(&mut self, _game: &mut Game, mut actions: Vec<Action>) -> Option<Action> {
-
         if actions.is_empty() {
             return None;
         }
@@ -58,7 +53,9 @@ pub struct EvalBot {
 
 impl EvalBot {
     pub fn new() -> Self {
-        Self { evaluator: Evaluator::new() }
+        Self {
+            evaluator: Evaluator::new(),
+        }
     }
 }
 
@@ -73,7 +70,10 @@ impl Bot for EvalBot {
         }
 
         // If all available actions are Remove actions, pick the card with lowest value to remove.
-        if actions.iter().all(|a| matches!(a.action, ActionKind::Remove)) {
+        if actions
+            .iter()
+            .all(|a| matches!(a.action, ActionKind::Remove))
+        {
             return actions
                 .iter()
                 .min_by_key(|a| a.card.map(|c| c.value()).unwrap_or(u8::MAX))
@@ -83,18 +83,14 @@ impl Bot for EvalBot {
         let player_index = game.current_player_index;
         let teammate_indices = game.teammate_indices(player_index);
         let opponent_indices: Vec<usize> = (0..game.players.len())
-            .filter(|i| {
-                *i != player_index &&
-                !teammate_indices.contains(i)
-            })
+            .filter(|i| *i != player_index && !teammate_indices.contains(i))
             .collect();
 
         let mut best_score = Score::MIN;
         let mut best_action: Option<Action> = None;
-        
+
         // Trade phase: simulate partner action for every traded card
         if game.trading_phase {
-            
             if teammate_indices.is_empty() {
                 return actions.into_iter().next();
             }
@@ -116,10 +112,10 @@ impl Bot for EvalBot {
 
                 let sim_context = EvalContext {
                     game: &sim_game,
-                    perspective: EvalPerspective { 
-                        player_index: partner_index, 
-                        partner_indices: partner_teammate_indices.clone(), 
-                        opponent_indices: opponent_indices.clone(), 
+                    perspective: EvalPerspective {
+                        player_index: partner_index,
+                        partner_indices: partner_teammate_indices.clone(),
+                        opponent_indices: opponent_indices.clone(),
                     },
                 };
 
@@ -133,17 +129,16 @@ impl Bot for EvalBot {
                 if score > best_score {
                     best_score = score;
 
-                    best_action = Some(Action { 
-                        player: sim_game.player_by_index(player_index).color, 
-                        card: action.card, 
-                        action: ActionKind::Trade });
+                    best_action = Some(Action {
+                        player: sim_game.player_by_index(player_index).color,
+                        card: action.card,
+                        action: ActionKind::Trade,
+                    });
                 }
             }
-
         } else {
             let all_actions = actions.clone();
             for action in all_actions {
-
                 // Simulate action
                 if game.action(action.card, action.clone()).is_err() {
                     continue;
@@ -185,9 +180,9 @@ impl Bot for EvalBot {
 mod random_bot_tests {
     use super::*;
     use crate::ai::generator::generate_all_legal_actions;
+    use crate::game::Game;
     use crate::game::card::Card;
     use crate::game::game::GameVariant;
-    use crate::game::Game;
     use crate::game::player::PlayerType;
 
     #[test]
@@ -201,7 +196,7 @@ mod random_bot_tests {
 
         let actions = generate_all_legal_actions(&game);
 
-        let action = bot.choose_action(&mut game,actions);
+        let action = bot.choose_action(&mut game, actions);
         assert!(action.is_some(), "Bot sollte eine Aktion wählen");
     }
 
@@ -216,6 +211,9 @@ mod random_bot_tests {
         let actions = generate_all_legal_actions(&game);
 
         let action = bot.choose_action(&mut game, actions);
-        assert!(action.is_none(), "Bot sollte None zurückgeben, wenn keine Aktionen möglich sind");
+        assert!(
+            action.is_none(),
+            "Bot sollte None zurückgeben, wenn keine Aktionen möglich sind"
+        );
     }
 }

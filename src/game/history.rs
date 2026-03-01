@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::game::card::Card;
 use super::action::*;
+use crate::game::card::Card;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 
 pub struct HistoryEntry {
@@ -22,5 +22,3 @@ pub struct HistoryEntry {
     pub grabbed_card: Option<Card>,
     pub grabbed_card_index: Option<usize>,
 }
-
-

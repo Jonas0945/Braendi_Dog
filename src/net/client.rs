@@ -1,9 +1,9 @@
 //Kommentare by Jonas
-// Einfacher TCP-Client für das Spiel. 
+// Einfacher TCP-Client für das Spiel.
 
-use crate::game::{Game, GameVariant, };
+use crate::BeginGameMesage;
 use crate::game::player::PlayerType;
-use crate::{BeginGameMesage};
+use crate::game::{Game, GameVariant};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -47,7 +47,6 @@ impl Client {
         Ok(())
     }
 }
-
 
 pub async fn starte_client(server_adresse: &str) -> Result<TcpStream, Box<dyn std::error::Error>> {
     let mut socket = TcpStream::connect(server_adresse).await?;

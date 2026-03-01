@@ -1,13 +1,13 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::piece::*;
 use super::action::*;
 use super::board::*;
 use super::card::*;
 use super::color::*;
 use super::deck::*;
 use super::history::*;
+use super::piece::*;
 //use super::piece::*;
 use super::player::*;
 
@@ -29,7 +29,6 @@ pub fn player_count(variant: &GameVariant) -> usize {
         GameVariant::FreeForAll(n) => *n,
     }
 }
-
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Game {
@@ -172,15 +171,15 @@ impl Game {
         );
 
         let colors = [
-            Color::Red, 
-            Color::Green, 
-            Color::Blue, 
-            Color::Yellow, 
-            Color::Purple, 
-            Color::Orange
+            Color::Red,
+            Color::Green,
+            Color::Blue,
+            Color::Yellow,
+            Color::Purple,
+            Color::Orange,
         ];
 
-       let players = (0..n)
+        let players = (0..n)
             .map(|i| Player {
                 player_type: player_types[i],
                 color: colors[i],
@@ -189,7 +188,7 @@ impl Game {
                     PlayerType::RandomBot => "Zufalls-Bot".to_string(),
                     PlayerType::EvalBot => "Schlauer Bot".to_string(),
                 },
-                pieces_to_place: 4, 
+                pieces_to_place: 4,
                 pieces_in_house: 0,
                 cards: Vec::new(),
             })
@@ -442,19 +441,19 @@ impl Game {
     }
 
     //fn find_team_pieces(&self, player_index: usize) -> Vec<usize> {
-   //     let controllable_player_indices = self.controllable_player_indices(player_index);
-     //   let mut positions = Vec::new();
+    //     let controllable_player_indices = self.controllable_player_indices(player_index);
+    //   let mut positions = Vec::new();
 
-       // for (index, tile) in self.board.tiles.iter().enumerate() {
-         //   if let Some(piece) = tile {
-         //       if controllable_player_indices.contains(&piece.owner) {
-      //              positions.push(index);
-       ///         }
-       //     }
-     //   }
+    // for (index, tile) in self.board.tiles.iter().enumerate() {
+    //   if let Some(piece) = tile {
+    //       if controllable_player_indices.contains(&piece.owner) {
+    //              positions.push(index);
+    ///         }
+    //     }
+    //   }
 
-      //  positions
-   // }
+    //  positions
+    // }
 
     fn find_movable_pieces(&self, player_index: usize) -> Vec<usize> {
         let controllable_player_indices = self.controllable_player_indices(player_index);
@@ -525,7 +524,9 @@ impl Game {
             self.board.distance_between(from, to, piece.owner)
         };
 
-        let Some(_distance) = distance else {return false};
+        let Some(_distance) = distance else {
+            return false;
+        };
 
         if let Some(path) = self.board.passed_tiles(from, to, piece.owner, backward) {
             self.board.is_path_free(&path)
@@ -534,8 +535,7 @@ impl Game {
         }
     }
 
-    fn action_place(&mut self, player_index: usize, _action:Action) -> Result<(), &'static str> {
-
+    fn action_place(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
         let ActionKind::Place { target_player } = _action.action else {
             return Err("Invalid action for place");
         };
@@ -561,17 +561,19 @@ impl Game {
                 self.board.tiles[start] = Some(piece);
                 return Err("Protected piece blocks the start field");
             }
-            
+
             beaten_piece_owner = Some(piece.owner);
             self.player_mut_by_index(piece.owner).pieces_to_place += 1;
         }
 
         self.board.tiles[start] = Some(Piece::new(target_player));
 
-        let played_card_index = Some(self.current_player()
-            .cards.iter()
-            .position(|&c| Some(c) == _action.card)
-            .unwrap()
+        let played_card_index = Some(
+            self.current_player()
+                .cards
+                .iter()
+                .position(|&c| Some(c) == _action.card)
+                .unwrap(),
         );
 
         if let Some(card) = _action.card {
@@ -605,8 +607,7 @@ impl Game {
         Ok(())
     }
 
-    fn action_move(& mut self, player_index: usize, _action:Action) -> Result<(), &'static str> {
-
+    fn action_move(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
         let ActionKind::Move { from, to } = _action.action else {
             return Err("Invalid action for move");
         };
@@ -614,10 +615,12 @@ impl Game {
         match _action.card {
             Some(Card::Jack) => return Err("Cannot move piece with Jack"),
             Some(Card::Seven) => return Err("Cannot move with Seven (use Split)"),
-            _ => {}   
+            _ => {}
         }
 
-        let moving_piece = self.board.check_tile(from)
+        let moving_piece = self
+            .board
+            .check_tile(from)
             .ok_or("Invalid move: no piece found")?;
 
         let left_start_before = moving_piece.left_start;
@@ -634,14 +637,18 @@ impl Game {
         let forward_distance = self.board.distance_between(from, to, moving_piece.owner);
         let backward_distance = self.board.distance_between(to, from, moving_piece.owner);
 
-        if !_action.card.map_or(true, |c| self.can_card_move(c, forward_distance, backward_distance)) {
+        if !_action.card.map_or(true, |c| {
+            self.can_card_move(c, forward_distance, backward_distance)
+        }) {
             return Err("Move not allowed with this card");
         }
 
         // FIX 2: Exakte Rückwärts-Berechnung
-        let is_backward = _action.card.map_or(false, |c| c.allows_backward_move()) && backward_distance == Some(4);
+        let is_backward = _action.card.map_or(false, |c| c.allows_backward_move())
+            && backward_distance == Some(4);
 
-        let path = self.board
+        let path = self
+            .board
             .passed_tiles(from, to, moving_piece.owner, is_backward)
             .ok_or("Invalid move: path cannot be calculated")?;
 
@@ -665,18 +672,20 @@ impl Game {
         }
 
         self.board.tiles[to] = Some(Piece {
-            owner: moving_piece.owner, 
-            left_start: true 
-            });
+            owner: moving_piece.owner,
+            left_start: true,
+        });
 
-        if from < self.board.ring_size && to >= self.board.ring_size { 
+        if from < self.board.ring_size && to >= self.board.ring_size {
             self.players[moving_piece.owner].pieces_in_house += 1;
         }
 
-        let played_card_index = Some(self.current_player()
-            .cards.iter()
-            .position(|&c| Some(c) == _action.card)
-            .unwrap()
+        let played_card_index = Some(
+            self.current_player()
+                .cards
+                .iter()
+                .position(|&c| Some(c) == _action.card)
+                .unwrap(),
         );
 
         if let Some(card) = _action.card {
@@ -684,11 +693,11 @@ impl Game {
             self.discard.push(card);
         }
 
-        self.history.push(HistoryEntry { 
+        self.history.push(HistoryEntry {
             action: _action,
             played_card_index,
 
-            beaten_piece_owner, 
+            beaten_piece_owner,
             interchanged_piece_owner: None,
             placed_piece_owner: None,
 
@@ -708,22 +717,28 @@ impl Game {
         Ok(())
     }
 
-
-    fn action_interchange(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
-        
+    fn action_interchange(
+        &mut self,
+        player_index: usize,
+        _action: Action,
+    ) -> Result<(), &'static str> {
         let ActionKind::Interchange { a, b } = _action.action else {
             return Err("Invalid action for interchange");
         };
 
         match _action.card {
-            Some(Card::Jack) | Some(Card::Joker) => {},
+            Some(Card::Jack) | Some(Card::Joker) => {}
             _ => return Err("Cannot interchange pieces with this card"),
         }
 
-        let a_piece = self.board.check_tile(a)
+        let a_piece = self
+            .board
+            .check_tile(a)
             .ok_or("Cannot interchange from an empty tile")?
             .clone();
-        let b_piece = self.board.check_tile(b)
+        let b_piece = self
+            .board
+            .check_tile(b)
             .ok_or("Cannot interchange to an empty tile")?
             .clone();
 
@@ -747,15 +762,17 @@ impl Game {
         self.board.tiles[a] = Some(b_piece);
         self.board.tiles[b] = Some(a_piece);
 
-        let played_card_index = Some(self.current_player()
-            .cards.iter()
-            .position(|&c| Some(c) == _action.card)
-            .unwrap()
+        let played_card_index = Some(
+            self.current_player()
+                .cards
+                .iter()
+                .position(|&c| Some(c) == _action.card)
+                .unwrap(),
         );
 
-        self.player_mut_by_index(player_index).remove_card(_action.card.unwrap());
+        self.player_mut_by_index(player_index)
+            .remove_card(_action.card.unwrap());
         self.discard.push(_action.card.unwrap());
-
 
         self.history.push(HistoryEntry {
             action: _action,
@@ -782,7 +799,6 @@ impl Game {
     }
 
     fn action_trade(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
-        
         if !matches!(_action.action, ActionKind::Trade) {
             return Err("Invalid action for trade");
         }
@@ -792,7 +808,11 @@ impl Game {
         }
 
         // FIX 5: Verhindere Doppel-Tausch!
-        if self.trade_buffer.iter().any(|(from, _, _)| *from == player_index) {
+        if self
+            .trade_buffer
+            .iter()
+            .any(|(from, _, _)| *from == player_index)
+        {
             return Err("Du hast bereits eine Karte zum Tauschen ausgewählt!");
         }
 
@@ -803,23 +823,27 @@ impl Game {
         }
 
         let card = _action.card.ok_or("Trade requires a card")?;
-        let played_card_index = Some(self.player_mut_by_index(player_index)
-            .cards
-            .iter()
-            .position(|&c| c == card)
-            .ok_or("Cannot trade: card not found in player's hand")?
+        let played_card_index = Some(
+            self.player_mut_by_index(player_index)
+                .cards
+                .iter()
+                .position(|&c| c == card)
+                .ok_or("Cannot trade: card not found in player's hand")?,
         );
-        let removed_card = self.player_mut_by_index(player_index).cards.remove(played_card_index.unwrap());
+        let removed_card = self
+            .player_mut_by_index(player_index)
+            .cards
+            .remove(played_card_index.unwrap());
 
-        let teammate_index = self.teammate_index(player_index)
+        let teammate_index = self
+            .teammate_index(player_index)
             .ok_or("Trade: teammate not found")?;
 
-        self.trade_buffer.push((player_index, teammate_index, removed_card));
+        self.trade_buffer
+            .push((player_index, teammate_index, removed_card));
 
         if self.trade_buffer.len() == self.players.len() {
-            let trades: Vec<_> = self.trade_buffer
-                .drain(..)
-                .collect();
+            let trades: Vec<_> = self.trade_buffer.drain(..).collect();
 
             for (_from_index, to_index, card) in trades {
                 self.player_mut_by_index(to_index).cards.push(card);
@@ -852,8 +876,11 @@ impl Game {
         Ok(())
     }
 
-    fn action_trade_grab(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
-
+    fn action_trade_grab(
+        &mut self,
+        player_index: usize,
+        _action: Action,
+    ) -> Result<(), &'static str> {
         let ActionKind::TradeGrab { target_card } = _action.action else {
             return Err("Invalid action for trade grab");
         };
@@ -872,14 +899,18 @@ impl Game {
         }
 
         // FIX 5: Verhindere Doppel-Tausch!
-       if self.trade_buffer.iter().any(|(_, to, _)| *to == player_index) {
+        if self
+            .trade_buffer
+            .iter()
+            .any(|(_, to, _)| *to == player_index)
+        {
             return Err("Du hast bereits eine Karte zum Tauschen ausgewählt!");
         }
 
         let previous_player = if player_index == 0 {
-                self.players.len() - 1
-            } else {
-                player_index - 1
+            self.players.len() - 1
+        } else {
+            player_index - 1
         };
 
         if target_card >= self.players[previous_player].cards.len() {
@@ -888,16 +919,16 @@ impl Game {
 
         let trade_buffer_before = self.trade_buffer.clone();
 
-        let removed_card = self.player_mut_by_index(previous_player)
+        let removed_card = self
+            .player_mut_by_index(previous_player)
             .cards
             .remove(target_card);
 
-        self.trade_buffer.push((previous_player, player_index, removed_card));
+        self.trade_buffer
+            .push((previous_player, player_index, removed_card));
 
         if self.trade_buffer.len() == self.players.len() {
-            let trades: Vec<_> = self.trade_buffer
-                .drain(..)
-                .collect();
+            let trades: Vec<_> = self.trade_buffer.drain(..).collect();
 
             for (_from_index, to_index, card) in trades {
                 self.player_mut_by_index(to_index).cards.push(card);
@@ -907,23 +938,23 @@ impl Game {
         }
 
         // History update
-        self.history.push(HistoryEntry { 
+        self.history.push(HistoryEntry {
             action: _action,
             played_card_index: None,
 
-            beaten_piece_owner: None, 
-            interchanged_piece_owner: None, 
-            placed_piece_owner: None, 
-            
-            split_rest_before: None, 
-            trade_buffer_before, 
-            left_start_before: false, 
-            
-            cards_dealt: Vec::new(), 
-            
-            grabbed_from_player: Some(previous_player), 
-            grabbed_card: Some(removed_card), 
-            grabbed_card_index: Some(target_card) 
+            beaten_piece_owner: None,
+            interchanged_piece_owner: None,
+            placed_piece_owner: None,
+
+            split_rest_before: None,
+            trade_buffer_before,
+            left_start_before: false,
+
+            cards_dealt: Vec::new(),
+
+            grabbed_from_player: Some(previous_player),
+            grabbed_card: Some(removed_card),
+            grabbed_card_index: Some(target_card),
         });
 
         self.next_player();
@@ -932,9 +963,8 @@ impl Game {
     }
 
     fn action_split(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
-        
         match _action.card {
-            Some(Card::Seven) | Some(Card::Joker) => {},
+            Some(Card::Seven) | Some(Card::Joker) => {}
             _ => return Err("Cannot split move with this card."),
         }
 
@@ -945,10 +975,16 @@ impl Game {
             _ => return Err("Invalid action kind for split"),
         };
 
-        let moving_piece = self.board.check_tile(from)
+        let moving_piece = self
+            .board
+            .check_tile(from)
             .ok_or("Invalid move: no piece found.")?;
-        
-        if moving_piece.owner != current_player_index && !self.teammate_indices(current_player_index).contains(&moving_piece.owner) {
+
+        if moving_piece.owner != current_player_index
+            && !self
+                .teammate_indices(current_player_index)
+                .contains(&moving_piece.owner)
+        {
             return Err("Cannot split-move a piece that is not yours or your teammate's.");
         }
 
@@ -958,7 +994,9 @@ impl Game {
         }
 
         let mut remaining_steps = self.split_rest.unwrap_or(7);
-        let total_distance = self.board.distance_between(from, to, moving_piece.owner)
+        let total_distance = self
+            .board
+            .distance_between(from, to, moving_piece.owner)
             .ok_or("Invalid action: cannot calculate distance")?;
 
         if total_distance == 0 || total_distance > 7 {
@@ -971,7 +1009,9 @@ impl Game {
         }
 
         // Calculate path
-        let path = self.board.passed_tiles(from, to, moving_piece.owner, false)
+        let path = self
+            .board
+            .passed_tiles(from, to, moving_piece.owner, false)
             .ok_or("Invalid split move: path cannot be calculated.")?;
 
         // Check for blocked tiles
@@ -990,19 +1030,21 @@ impl Game {
         let mut split_rest_before = self.split_rest;
         let mut left_start_before = moving_piece.left_start;
 
-        let played_card_index = Some(self.current_player()
-            .cards.iter()
-            .position(|&c| Some(c) == _action.card)
-            .unwrap()
+        let played_card_index = Some(
+            self.current_player()
+                .cards
+                .iter()
+                .position(|&c| Some(c) == _action.card)
+                .unwrap(),
         );
 
         for &tile in &path {
-
             // Create "mini"- history if piece is beaten
             if let Some(beaten_piece) = self.board.tiles[tile].take() {
                 self.player_mut_by_index(beaten_piece.owner).pieces_to_place += 1;
 
-                let distance = self.board
+                let distance = self
+                    .board
                     .distance_between(current_position, tile, moving_piece.owner)
                     .expect("Distance must exist");
 
@@ -1011,7 +1053,10 @@ impl Game {
                     action: Action {
                         player: _action.player,
                         card: _action.card,
-                        action: ActionKind::Split { from: current_position, to: tile },
+                        action: ActionKind::Split {
+                            from: current_position,
+                            to: tile,
+                        },
                     },
                     played_card_index,
 
@@ -1052,7 +1097,8 @@ impl Game {
 
         // History update if last step doesn't beat piece
         if current_position != to {
-            let distance = self.board
+            let distance = self
+                .board
                 .distance_between(current_position, to, moving_piece.owner)
                 .expect("Distance must exist");
 
@@ -1064,7 +1110,10 @@ impl Game {
                 action: Action {
                     player: _action.player,
                     card: _action.card,
-                    action: ActionKind::Split { from: current_position, to },
+                    action: ActionKind::Split {
+                        from: current_position,
+                        to,
+                    },
                 },
                 played_card_index,
 
@@ -1089,7 +1138,8 @@ impl Game {
         // Update split_rest & update current player
         if remaining_steps == 0 {
             self.split_rest = None;
-            self.player_mut_by_index(current_player_index).remove_card(_action.card.unwrap());
+            self.player_mut_by_index(current_player_index)
+                .remove_card(_action.card.unwrap());
             self.discard.push(_action.card.unwrap());
             self.next_player();
         } else {
@@ -1100,18 +1150,18 @@ impl Game {
     }
 
     fn action_remove(&mut self, player_index: usize, _action: Action) -> Result<(), &'static str> {
-        
         if self.check_if_any_action_possible() {
             return Err("Cannot remove: other action possible.");
         }
 
         let card = _action.card.ok_or("Remove action requires a card.")?;
 
-        let played_card_index = Some(self.players[player_index]
-            .cards
-            .iter()
-            .position(|&c| c == card)
-            .ok_or("Cannot remove: card not found in player's hand.")?
+        let played_card_index = Some(
+            self.players[player_index]
+                .cards
+                .iter()
+                .position(|&c| c == card)
+                .ok_or("Cannot remove: card not found in player's hand.")?,
         );
 
         self.players[player_index].remove_card(card);
@@ -1155,7 +1205,11 @@ impl Game {
             _ => return Err("Invalid action: cannot grab with this card."),
         };
 
-        let ActionKind::Grab { target_card, target_player } = _action.action else {
+        let ActionKind::Grab {
+            target_card,
+            target_player,
+        } = _action.action
+        else {
             return Err("Invalid grab action.");
         };
 
@@ -1170,16 +1224,16 @@ impl Game {
         }
 
         // Update player cards
-        let grabbed_card = self.players[target_player_index]
-            .cards
-            .remove(target_card);
+        let grabbed_card = self.players[target_player_index].cards.remove(target_card);
 
         self.players[player_index].cards.push(grabbed_card);
 
-        let played_card_index = Some(self.current_player()
-            .cards.iter()
-            .position(|&c| Some(c) == _action.card)
-            .unwrap()
+        let played_card_index = Some(
+            self.current_player()
+                .cards
+                .iter()
+                .position(|&c| Some(c) == _action.card)
+                .unwrap(),
         );
 
         self.players[player_index].remove_card(card);
@@ -1209,7 +1263,6 @@ impl Game {
 
         Ok(())
     }
-
 }
 
 pub trait DogGame {
@@ -1246,21 +1299,26 @@ impl DogGame for Game {
     }
 
     fn action(&mut self, card: Option<Card>, _action: Action) -> Result<(), &'static str> {
-        
         if self.current_player().color != _action.player {
             return Err("It's not his player's turn.");
         }
 
         if self.split_rest.is_some() && !matches!(_action.action, ActionKind::Split { .. }) {
-                return Err("Cannot perform actions other than Split during splitting phase.");
+            return Err("Cannot perform actions other than Split during splitting phase.");
         }
 
-        if self.trading_phase && !matches!(_action.action, ActionKind::Trade | ActionKind::TradeGrab { .. }) {
+        if self.trading_phase
+            && !matches!(
+                _action.action,
+                ActionKind::Trade | ActionKind::TradeGrab { .. }
+            )
+        {
             return Err("Cannot perform actions other than Trade during swapping phase.");
         }
 
         match _action.action {
-            ActionKind::TradeGrab { .. } | ActionKind::Undo => {                if card.is_some() {
+            ActionKind::TradeGrab { .. } | ActionKind::Undo => {
+                if card.is_some() {
                     return Err("Invalid action: TradeGrab does not use a card.");
                 }
             }
@@ -1271,7 +1329,6 @@ impl DogGame for Game {
                     return Err("Invalid action: Card not in player's hand.");
                 }
             }
-
         }
 
         let current_player = self.current_player_index;
@@ -1284,18 +1341,18 @@ impl DogGame for Game {
 
             // Move: Player can move piece for a given distance
             ActionKind::Move { .. } => {
-                self.action_move(current_player, _action)?;      
-            },
+                self.action_move(current_player, _action)?;
+            }
 
             // Interchange: Player can switch the position of two pieces on the ring
-            ActionKind::Interchange  { .. } => {
+            ActionKind::Interchange { .. } => {
                 self.action_interchange(current_player, _action)?;
-            },
+            }
 
             // Trade: Player trades on card to his team members at the beginning of each round
             ActionKind::Trade => {
-                self.action_trade(current_player, _action)?;        
-            },
+                self.action_trade(current_player, _action)?;
+            }
 
             // TradeGrab: FFA variant of Trade at the beginning of each new round (player chooses card of right-sided neighbour)
             ActionKind::TradeGrab { .. } => {
@@ -1305,18 +1362,18 @@ impl DogGame for Game {
             // Split: Player can distribute move value to different pieces
             ActionKind::Split { .. } => {
                 self.action_split(current_player, _action)?;
-            },
+            }
 
             // Remove: Player removes one card in his hand of no other action is possible
             ActionKind::Remove => {
                 self.action_remove(current_player, _action)?;
-            },
+            }
 
             // Grab: Player draws one card from target_player using Card::Two
             ActionKind::Grab { .. } => {
                 self.action_grab(current_player, _action)?;
-            },
-            ActionKind::Undo => { 
+            }
+            ActionKind::Undo => {
                 self.undo_turn()?;
                 return Ok(());
             }
@@ -1343,7 +1400,7 @@ impl DogGame for Game {
 
         let entry_player_index = self.index_of_color(entry.action.player);
         let played_card = entry.action.card;
-        
+
         let played_card_index = entry.played_card_index.unwrap_or(0);
 
         match entry.action.action {
@@ -1367,7 +1424,9 @@ impl DogGame for Game {
                 }
 
                 self.discard.pop();
-                self.players[entry_player_index].cards.insert(played_card_index, played_card.unwrap());
+                self.players[entry_player_index]
+                    .cards
+                    .insert(played_card_index, played_card.unwrap());
 
                 self.current_player_index = entry_player_index;
             }
@@ -1388,7 +1447,9 @@ impl DogGame for Game {
                 });
 
                 self.discard.pop();
-                self.players[entry_player_index].cards.push(played_card.unwrap());
+                self.players[entry_player_index]
+                    .cards
+                    .push(played_card.unwrap());
 
                 self.current_player_index = entry_player_index;
             }
@@ -1417,7 +1478,9 @@ impl DogGame for Game {
                 }
 
                 self.discard.pop();
-                self.players[entry_player_index].cards.insert(played_card_index, played_card.unwrap());
+                self.players[entry_player_index]
+                    .cards
+                    .insert(played_card_index, played_card.unwrap());
 
                 self.current_player_index = entry_player_index;
             }
@@ -1425,7 +1488,6 @@ impl DogGame for Game {
             ActionKind::Trade => {
                 // Check if trade phase just ended
                 if entry.trade_buffer_before.len() == (self.players.len() - 1) {
-
                     let mut trades: Vec<_> = entry.trade_buffer_before.clone();
                     trades.push((
                         entry_player_index,
@@ -1453,7 +1515,6 @@ impl DogGame for Game {
             ActionKind::TradeGrab { .. } => {
                 // Check if trade phase just ended
                 if entry.trade_buffer_before.len() == (self.players.len() - 1) {
-
                     let mut trades: Vec<_> = entry.trade_buffer_before.clone();
                     trades.push((
                         entry.grabbed_from_player.unwrap(),
@@ -1473,14 +1534,14 @@ impl DogGame for Game {
                     }
 
                     self.trading_phase = true;
-
                 }
 
                 let grabbed_from_player = entry.grabbed_from_player.unwrap();
                 let grabbed_card_index = entry.grabbed_card_index.unwrap();
                 let grabbed_card = entry.grabbed_card.unwrap();
 
-                self.players[grabbed_from_player].cards
+                self.players[grabbed_from_player]
+                    .cards
                     .insert(grabbed_card_index, grabbed_card);
 
                 self.trade_buffer = entry.trade_buffer_before;
@@ -1513,7 +1574,9 @@ impl DogGame for Game {
                 // Return card if split just began
                 if entry.split_rest_before.is_none() {
                     self.discard.pop();
-                    self.players[entry_player_index].cards.insert(played_card_index, played_card.unwrap());
+                    self.players[entry_player_index]
+                        .cards
+                        .insert(played_card_index, played_card.unwrap());
                 }
 
                 self.split_rest = entry.split_rest_before;
@@ -1522,7 +1585,9 @@ impl DogGame for Game {
 
             ActionKind::Remove => {
                 self.discard.pop();
-                self.players[entry_player_index].cards.push(played_card.unwrap());
+                self.players[entry_player_index]
+                    .cards
+                    .push(played_card.unwrap());
 
                 self.current_player_index = entry_player_index;
             }
@@ -1552,14 +1617,14 @@ impl DogGame for Game {
 
                 self.players[entry_player_index].cards.remove(card_index);
                 self.discard.pop();
-                self.players[entry_player_index].cards.insert(played_card_index, played_card.unwrap());
+                self.players[entry_player_index]
+                    .cards
+                    .insert(played_card_index, played_card.unwrap());
 
                 self.prev_player();
             }
 
-            ActionKind::Undo => {
-             
-            }
+            ActionKind::Undo => {}
         }
 
         Ok(())
@@ -1616,7 +1681,7 @@ impl DogGame for Game {
         self.deck.shuffle();
         self.discard.clear();
 
-        let round_index = (self.round - 1) % 5; 
+        let round_index = (self.round - 1) % 5;
         let cards_to_deal = CARDS_PER_ROUND[round_index as usize];
 
         // Deal cards
@@ -1677,21 +1742,57 @@ mod tests {
 
             #[test]
             fn game_variant_player_counts() {
-                assert_eq!(Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]).players.len(), 4);
-                assert_eq!(Game::new(GameVariant::ThreeVsThree, vec![PlayerType::Human; 6]).players.len(), 6);
-                assert_eq!(Game::new(GameVariant::TwoVsTwoVsTwo, vec![PlayerType::Human; 6]).players.len(), 6);
+                assert_eq!(
+                    Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4])
+                        .players
+                        .len(),
+                    4
+                );
+                assert_eq!(
+                    Game::new(GameVariant::ThreeVsThree, vec![PlayerType::Human; 6])
+                        .players
+                        .len(),
+                    6
+                );
+                assert_eq!(
+                    Game::new(GameVariant::TwoVsTwoVsTwo, vec![PlayerType::Human; 6])
+                        .players
+                        .len(),
+                    6
+                );
 
                 for n in 2..=6 {
-                    assert_eq!(Game::new(GameVariant::FreeForAll(n), vec![PlayerType::Human; n]).players.len(), n);
+                    assert_eq!(
+                        Game::new(GameVariant::FreeForAll(n), vec![PlayerType::Human; n])
+                            .players
+                            .len(),
+                        n
+                    );
                 }
             }
 
             #[test]
             fn teams_exist_only_in_team_modes() {
-                assert!(Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]).teams.is_some());
-                assert!(Game::new(GameVariant::ThreeVsThree, vec![PlayerType::Human; 6]).teams.is_some());
-                assert!(Game::new(GameVariant::TwoVsTwoVsTwo, vec![PlayerType::Human; 6]).teams.is_some());
-                assert!(Game::new(GameVariant::FreeForAll(4), vec![PlayerType::Human; 4]).teams.is_none());
+                assert!(
+                    Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4])
+                        .teams
+                        .is_some()
+                );
+                assert!(
+                    Game::new(GameVariant::ThreeVsThree, vec![PlayerType::Human; 6])
+                        .teams
+                        .is_some()
+                );
+                assert!(
+                    Game::new(GameVariant::TwoVsTwoVsTwo, vec![PlayerType::Human; 6])
+                        .teams
+                        .is_some()
+                );
+                assert!(
+                    Game::new(GameVariant::FreeForAll(4), vec![PlayerType::Human; 4])
+                        .teams
+                        .is_none()
+                );
             }
         }
 
@@ -1824,14 +1925,16 @@ mod tests {
                 assert_eq!(game_3v3.current_player_index, 0);
 
                 // 2 vs 2 vs 2
-                let mut game_2v2v2 = Game::new(GameVariant::TwoVsTwoVsTwo, vec![PlayerType::Human; 6]);
+                let mut game_2v2v2 =
+                    Game::new(GameVariant::TwoVsTwoVsTwo, vec![PlayerType::Human; 6]);
                 game_2v2v2.current_player_index = game_2v2v2.players.len() - 1;
                 game_2v2v2.next_player();
                 assert_eq!(game_2v2v2.current_player_index, 0);
 
                 // Free-for-All
                 for n in 2..=6 {
-                    let mut game_ffa = Game::new(GameVariant::FreeForAll(n), vec![PlayerType::Human; n]);
+                    let mut game_ffa =
+                        Game::new(GameVariant::FreeForAll(n), vec![PlayerType::Human; n]);
                     game_ffa.current_player_index = game_ffa.players.len() - 1;
                     game_ffa.next_player();
                     assert_eq!(game_ffa.current_player_index, 0);
@@ -1864,7 +1967,8 @@ mod tests {
 
                 // Free-for-All
                 for n in 2..=6 {
-                    let game_ffa = Game::new(GameVariant::FreeForAll(n), vec![PlayerType::Human; n]);
+                    let game_ffa =
+                        Game::new(GameVariant::FreeForAll(n), vec![PlayerType::Human; n]);
                     for (i, player) in game_ffa.players.iter().enumerate() {
                         assert_eq!(game_ffa.index_of_color(player.color), i);
                     }
@@ -2373,10 +2477,10 @@ mod tests {
 
             let action = Action {
                 player: Color::Green,
-                action: ActionKind::Place {target_player: 1},
+                action: ActionKind::Place { target_player: 1 },
                 card: Some(Card::Ace),
             };
-      
+
             assert!(game.action(Some(Card::Ace), action).is_err());
             assert_eq!(game.current_player_index, 0);
         }
@@ -2395,7 +2499,7 @@ mod tests {
 
             let action = Action {
                 player: Color::Red,
-                action: ActionKind:: Place { target_player: 0 },
+                action: ActionKind::Place { target_player: 0 },
                 card: Some(Card::Two),
             };
 
@@ -2438,7 +2542,8 @@ mod tests {
 
                 // Free-for-All fails because start is already occupied by default
                 for n in 2..=6 {
-                    let mut game = setup_game(GameVariant::FreeForAll(n), vec![PlayerType::Human; n]);
+                    let mut game =
+                        setup_game(GameVariant::FreeForAll(n), vec![PlayerType::Human; n]);
                     let player_index = 0;
                     game.players[player_index].cards = vec![Card::Ace, Card::King, Card::Joker];
 
@@ -2446,7 +2551,9 @@ mod tests {
                     let card = Card::Ace;
                     let action = Action {
                         player: game.players[player_index].color,
-                        action: ActionKind::Place { target_player: player_index },
+                        action: ActionKind::Place {
+                            target_player: player_index,
+                        },
                         card: Some(card),
                     };
 
@@ -2466,7 +2573,9 @@ mod tests {
                     let card = Card::Ace;
                     let action = Action {
                         player: game.players[player_index].color,
-                        action: ActionKind::Place { target_player: player_index },
+                        action: ActionKind::Place {
+                            target_player: player_index,
+                        },
                         card: Some(card),
                     };
 
@@ -2486,14 +2595,17 @@ mod tests {
                 ];
 
                 for n in 2..=6 {
-                    let mut game = setup_game(GameVariant::FreeForAll(n), vec![PlayerType::Human; n]);
+                    let mut game =
+                        setup_game(GameVariant::FreeForAll(n), vec![PlayerType::Human; n]);
                     let player_index = 0;
                     game.players[player_index].cards = vec![Card::Ace];
                     game.players[player_index].pieces_to_place = 0;
 
                     let action = Action {
                         player: game.players[player_index].color,
-                        action: ActionKind::Place { target_player: player_index },
+                        action: ActionKind::Place {
+                            target_player: player_index,
+                        },
                         card: Some(Card::Ace),
                     };
 
@@ -2509,7 +2621,9 @@ mod tests {
 
                     let action = Action {
                         player: game.players[player_index].color,
-                        action: ActionKind::Place { target_player: player_index },
+                        action: ActionKind::Place {
+                            target_player: player_index,
+                        },
                         card: Some(Card::Ace),
                     };
 
@@ -2526,7 +2640,8 @@ mod tests {
                 ];
 
                 for n in 2..=6 {
-                    let mut game = setup_game(GameVariant::FreeForAll(n), vec![PlayerType::Human; n]);
+                    let mut game =
+                        setup_game(GameVariant::FreeForAll(n), vec![PlayerType::Human; n]);
                     let player_index = 0;
                     game.players[player_index].cards = vec![Card::Ace];
 
@@ -2538,12 +2653,17 @@ mod tests {
 
                     let action = Action {
                         player: game.players[player_index].color,
-                        action: ActionKind::Place { target_player: player_index },
+                        action: ActionKind::Place {
+                            target_player: player_index,
+                        },
                         card: Some(Card::Ace),
                     };
 
                     assert!(game.action(Some(Card::Ace), action).is_err());
-                    assert_eq!(game.board.tiles[start].as_ref().unwrap().owner, player_index);
+                    assert_eq!(
+                        game.board.tiles[start].as_ref().unwrap().owner,
+                        player_index
+                    );
                 }
 
                 for variant in variants {
@@ -2560,12 +2680,17 @@ mod tests {
 
                     let action = Action {
                         player: game.players[player_index].color,
-                        action: ActionKind::Place { target_player: player_index },
+                        action: ActionKind::Place {
+                            target_player: player_index,
+                        },
                         card: Some(Card::Ace),
                     };
 
                     assert!(game.action(Some(Card::Ace), action).is_err());
-                    assert_eq!(game.board.tiles[start].as_ref().unwrap().owner, player_index);
+                    assert_eq!(
+                        game.board.tiles[start].as_ref().unwrap().owner,
+                        player_index
+                    );
                 }
             }
 
@@ -2590,12 +2715,17 @@ mod tests {
 
                         let action = Action {
                             player: game.players[player_index].color,
-                            action: ActionKind::Place { target_player: teammate_index },
+                            action: ActionKind::Place {
+                                target_player: teammate_index,
+                            },
                             card: Some(Card::Ace),
                         };
 
                         assert!(game.action(Some(Card::Ace), action).is_ok());
-                        assert_eq!(game.board.tiles[start].as_ref().unwrap().owner, teammate_index);
+                        assert_eq!(
+                            game.board.tiles[start].as_ref().unwrap().owner,
+                            teammate_index
+                        );
                         assert_eq!(game.players[teammate_index].pieces_to_place, 3);
                         assert!(!game.players[player_index].cards.contains(&Card::Ace));
                     }
@@ -2612,8 +2742,8 @@ mod tests {
                 let invalid_card = Card::Two;
                 let action = Action {
                     player: Color::Red,
-                    action: ActionKind:: Place { target_player: 0 },
-                    card: Some(invalid_card)
+                    action: ActionKind::Place { target_player: 0 },
+                    card: Some(invalid_card),
                 };
 
                 assert!(game.action(Some(Card::Two), action).is_err());
@@ -2636,7 +2766,7 @@ mod tests {
 
                 let action = Action {
                     player: Color::Red,
-                    action: ActionKind:: Place { target_player: 2 },
+                    action: ActionKind::Place { target_player: 2 },
                     card: Some(Card::Ace),
                 };
 
@@ -2654,7 +2784,7 @@ mod tests {
                 let card = Some(Card::Ace);
                 let action = Action {
                     player: Color::Red,
-                    action: ActionKind:: Place { target_player: 0 },
+                    action: ActionKind::Place { target_player: 0 },
                     card: Some(Card::Ace),
                 };
 
@@ -2684,7 +2814,7 @@ mod tests {
 
                 let action = Action {
                     player: Color::Red,
-                    action: ActionKind:: Place { target_player: 0 },
+                    action: ActionKind::Place { target_player: 0 },
                     card: Some(Card::Ace),
                 };
 
@@ -2743,7 +2873,8 @@ mod tests {
 
                 // Free-for-All
                 for n in 2..=6 {
-                    let mut game = setup_game(GameVariant::FreeForAll(n), vec![PlayerType::Human; n]);
+                    let mut game =
+                        setup_game(GameVariant::FreeForAll(n), vec![PlayerType::Human; n]);
                     let player_index = 0;
                     let opponent_index = 1;
 
@@ -2836,7 +2967,7 @@ mod tests {
                     card: Some(Card::Two),
                 };
 
-                assert!(game.action(Some(Card::Two), action).is_err()); 
+                assert!(game.action(Some(Card::Two), action).is_err());
             }
 
             #[test]
@@ -3025,7 +3156,7 @@ mod tests {
 
                 let action2 = Action {
                     player: Color::Red,
-                    action: ActionKind::Interchange {a: 3, b: 2 },
+                    action: ActionKind::Interchange { a: 3, b: 2 },
                     card: Some(Card::Jack),
                 };
 
@@ -3071,7 +3202,8 @@ mod tests {
 
                 // Free-for-All
                 for n in 2..=6 {
-                    let mut game = setup_game(GameVariant::FreeForAll(n), vec![PlayerType::Human; n]);
+                    let mut game =
+                        setup_game(GameVariant::FreeForAll(n), vec![PlayerType::Human; n]);
                     game.players[0].cards = vec![Card::Five];
                     game.board.tiles[0] = Some(Piece {
                         owner: 0,
@@ -3284,7 +3416,7 @@ mod tests {
 
                 let action = Action {
                     player: Color::Red,
-                    action: ActionKind::Move { from: 60 , to: 65 },
+                    action: ActionKind::Move { from: 60, to: 65 },
                     card: Some(Card::Five),
                 };
 
@@ -3596,7 +3728,7 @@ mod tests {
                 let action2 = Action {
                     player: Color::Red,
                     action: ActionKind::Split { from: 4, to: 6 },
-                    card: Some(Card::Seven)
+                    card: Some(Card::Seven),
                 };
 
                 assert!(game.action(Some(Card::Seven), action1).is_ok());
@@ -4019,7 +4151,7 @@ mod tests {
 
                 assert!(game.action(Some(Card::Seven), action).is_err());
             }
-        
+
             #[test]
             fn split_in_ffa_can_move_opponents_piece() {
                 let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
@@ -4373,14 +4505,14 @@ mod tests {
                 assert_eq!(game.board.tiles, board_before);
             }
         }
-    
+
         mod action_trade_grab_tests {
             use super::*;
 
             #[test]
             fn trade_grab_successful() {
                 let mut game = Game::new(GameVariant::FreeForAll(3), vec![PlayerType::Human; 3]);
-                
+
                 game.players[0].cards = vec![Card::Ace];
                 game.players[1].cards = vec![Card::Two];
                 game.players[2].cards = vec![Card::Three, Card::Four];
@@ -4388,7 +4520,7 @@ mod tests {
                 let action = Action {
                     player: game.players[0].color,
                     card: None,
-                    action: ActionKind::TradeGrab { target_card: 0 } // Three of player 3
+                    action: ActionKind::TradeGrab { target_card: 0 }, // Three of player 3
                 };
 
                 assert!(game.action(None, action).is_ok());
@@ -4401,22 +4533,22 @@ mod tests {
             #[test]
             fn trade_grab_full_round_successful() {
                 let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
-                
+
                 game.players[0].cards = vec![Card::Ace, Card::Two];
                 game.players[1].cards = vec![Card::Three, Card::Four];
 
                 let action1 = Action {
                     player: game.players[0].color,
                     card: None,
-                    action: ActionKind::TradeGrab { target_card: 0 }
+                    action: ActionKind::TradeGrab { target_card: 0 },
                 };
 
                 let action2 = Action {
                     player: game.players[1].color,
                     card: None,
-                    action: ActionKind::TradeGrab { target_card: 1 }
+                    action: ActionKind::TradeGrab { target_card: 1 },
                 };
-                
+
                 // First trade grab
                 assert!(game.action(None, action1).is_ok());
 
@@ -4528,7 +4660,7 @@ mod tests {
                 assert_eq!(entry.trade_buffer_before.len(), 0);
             }
         }
-    }    
+    }
 
     mod undo_tests {
         use super::*;
@@ -4556,7 +4688,7 @@ mod tests {
 
                     let action = Action {
                         player: Color::Red,
-                        action: ActionKind:: Place { target_player: 0 },
+                        action: ActionKind::Place { target_player: 0 },
                         card: Some(Card::Ace),
                     };
 
@@ -4580,7 +4712,7 @@ mod tests {
 
                     let action = Action {
                         player: Color::Red,
-                        action: ActionKind:: Place { target_player: 0 },
+                        action: ActionKind::Place { target_player: 0 },
                         card: Some(Card::Ace),
                     };
 
@@ -4620,7 +4752,7 @@ mod tests {
                     // Card not in player's hand
                     let action = Action {
                         player: Color::Red,
-                        action: ActionKind:: Place { target_player: 0 },
+                        action: ActionKind::Place { target_player: 0 },
                         card: Some(Card::Ace),
                     };
 
@@ -4659,7 +4791,7 @@ mod tests {
 
                     let action = Action {
                         player: Color::Red,
-                        action: ActionKind:: Place { target_player: 2 },
+                        action: ActionKind::Place { target_player: 2 },
                         card: Some(Card::Ace),
                     };
 
@@ -4689,7 +4821,7 @@ mod tests {
 
                     let action = Action {
                         player: Color::Red,
-                        action: ActionKind:: Place { target_player: 0 },
+                        action: ActionKind::Place { target_player: 0 },
                         card: Some(Card::Ace),
                     };
 
@@ -4798,13 +4930,13 @@ mod tests {
                     let action1 = Action {
                         player: Color::Red,
                         card: Some(Card::Two),
-                        action: ActionKind::Move { from: 0,to: 65 },
+                        action: ActionKind::Move { from: 0, to: 65 },
                     };
 
                     let action2 = Action {
                         player: Color::Red,
                         card: Some(Card::Ace),
-                        action: ActionKind::Move { from: 65,to: 66 }
+                        action: ActionKind::Move { from: 65, to: 66 },
                     };
 
                     assert!(game.action(Some(Card::Two), action1).is_ok());
@@ -4872,7 +5004,7 @@ mod tests {
                     let _action = Action {
                         player: Color::Red,
                         card: Some(Card::Two),
-                        action: ActionKind::Move { from: 0, to: 2},
+                        action: ActionKind::Move { from: 0, to: 2 },
                     };
 
                     assert!(game.action(Some(Card::Two), _action).is_ok());
@@ -5254,7 +5386,7 @@ mod tests {
 
                     let action = Action {
                         player: Color::Red,
-                        action: ActionKind::Interchange { a: 0, b: 1},
+                        action: ActionKind::Interchange { a: 0, b: 1 },
                         card: Some(Card::Jack),
                     };
 
@@ -5402,7 +5534,8 @@ mod tests {
 
                 #[test]
                 fn undo_grab_restores_hands() {
-                    let mut game = Game::new(GameVariant::FreeForAll(3), vec![PlayerType::Human; 3]);
+                    let mut game =
+                        Game::new(GameVariant::FreeForAll(3), vec![PlayerType::Human; 3]);
                     game.trading_phase = false;
 
                     game.players[0].cards = vec![Card::Two];
@@ -5430,7 +5563,8 @@ mod tests {
 
                 #[test]
                 fn undo_grab_restores_card_at_original_index() {
-                    let mut game = Game::new(GameVariant::FreeForAll(3), vec![PlayerType::Human; 3]);
+                    let mut game =
+                        Game::new(GameVariant::FreeForAll(3), vec![PlayerType::Human; 3]);
                     game.trading_phase = false;
 
                     game.current_player_index = 0;
@@ -5458,7 +5592,8 @@ mod tests {
 
                 #[test]
                 fn undo_grab_restores_current_player() {
-                    let mut game = Game::new(GameVariant::FreeForAll(3), vec![PlayerType::Human; 3]);
+                    let mut game =
+                        Game::new(GameVariant::FreeForAll(3), vec![PlayerType::Human; 3]);
                     game.trading_phase = false;
 
                     game.current_player_index = 0;
@@ -5484,7 +5619,8 @@ mod tests {
 
                 #[test]
                 fn undo_grab_removes_history_entry() {
-                    let mut game = Game::new(GameVariant::FreeForAll(3), vec![PlayerType::Human; 3]);
+                    let mut game =
+                        Game::new(GameVariant::FreeForAll(3), vec![PlayerType::Human; 3]);
                     game.trading_phase = false;
 
                     game.players[0].cards = vec![Card::Two];
@@ -5508,13 +5644,14 @@ mod tests {
                     assert_eq!(game.history.len(), history_len_before);
                 }
             }
-            
+
             mod undo_trade_grab_tests {
                 use super::*;
 
                 #[test]
                 fn undo_trade_grab_basic() {
-                    let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
+                    let mut game =
+                        Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
                     game.trading_phase = true;
 
                     game.players[0].cards = vec![Card::Ace, Card::Two];
@@ -5544,7 +5681,8 @@ mod tests {
 
                 #[test]
                 fn undo_trade_grab_full() {
-                    let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
+                    let mut game =
+                        Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
                     game.trading_phase = true;
 
                     game.players[0].cards = vec![Card::Ace, Card::Two];
@@ -5591,11 +5729,7 @@ mod tests {
                     assert_eq!(game.trade_buffer.len(), 0);
                     assert_eq!(game.current_player_index, 0);
                 }
-
-
             }
-        
-            
         }
 
         mod undo_turn_tests {
@@ -5610,7 +5744,7 @@ mod tests {
 
                 let action = Action {
                     player: Color::Red,
-                    action: ActionKind:: Place { target_player: 0 },
+                    action: ActionKind::Place { target_player: 0 },
                     card: Some(Card::Ace),
                 };
 
@@ -5733,13 +5867,13 @@ mod tests {
 
                 let action_red = Action {
                     player: Color::Red,
-                    action: ActionKind:: Place { target_player: 0 },
+                    action: ActionKind::Place { target_player: 0 },
                     card: Some(Card::Ace),
                 };
 
                 let action_green = Action {
                     player: Color::Green,
-                    action: ActionKind:: Place { target_player: 1 },
+                    action: ActionKind::Place { target_player: 1 },
                     card: Some(Card::Ace),
                 };
 
@@ -5788,7 +5922,7 @@ mod tests {
                 let place_action = Action {
                     player: Color::Red,
                     card: Some(Card::Ace),
-                    action: ActionKind:: Place { target_player: 0 },
+                    action: ActionKind::Place { target_player: 0 },
                 };
 
                 assert!(game.action(Some(Card::Ace), place_action).is_ok());

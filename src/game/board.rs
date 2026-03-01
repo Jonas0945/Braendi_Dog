@@ -2,8 +2,6 @@ use serde::{Deserialize, Serialize};
 
 /// Pro Spieler werden 16 Felder ausgehend vom Start bis zum nächsten Startfeld kalkuliert
 /// Die Ringgröße entscheidet über die Position der HOUSE_TILES, statt sie fest als Konstante zu schreiben.
-
-
 use super::piece::Piece;
 
 pub type Point = usize; // 0–79
@@ -35,7 +33,7 @@ impl Board {
         self.tiles[p]
     }
 
-    pub fn start_field(&self,player_index: usize) -> Point {
+    pub fn start_field(&self, player_index: usize) -> Point {
         player_index * 16
     }
 
@@ -43,10 +41,13 @@ impl Board {
         self.tiles[p].is_some()
     }
 
-    pub fn is_blocked (&self, p: Point) -> bool {
+    pub fn is_blocked(&self, p: Point) -> bool {
         matches!(
             self.tiles[p],
-            Some(Piece { left_start: false, .. })
+            Some(Piece {
+                left_start: false,
+                ..
+            })
         )
     }
 
@@ -77,7 +78,6 @@ impl Board {
 
         // Piece already in house
         if from >= ring_size {
-            
             // Check correct in-house movement
             if !house.contains(&from) || !house.contains(&to) || to < from {
                 return None;
@@ -85,12 +85,11 @@ impl Board {
 
             return (to - from).try_into().ok();
         }
-        
+
         // Moving from the ring into the house
         if to >= ring_size {
-            
             if !house.contains(&to) {
-                return None; 
+                return None;
             }
 
             let house_entry = self.start_field(player_index); // Equals start_field
@@ -101,14 +100,20 @@ impl Board {
             return (distance_to_house_entry + 1 + steps_in_house)
                 .try_into()
                 .ok();
-        } 
-        
+        }
+
         // Moving around the ring
-            let distance = (to + ring_size - from) % ring_size;
-            Some(distance as u8)
+        let distance = (to + ring_size - from) % ring_size;
+        Some(distance as u8)
     }
 
-    pub fn passed_tiles(&self, from: usize, to: usize, player_index: usize, backward: bool) -> Option<Vec<Point>> {
+    pub fn passed_tiles(
+        &self,
+        from: usize,
+        to: usize,
+        player_index: usize,
+        backward: bool,
+    ) -> Option<Vec<Point>> {
         let ring_size = self.ring_size;
         let num_players = ring_size / 16;
 
@@ -132,23 +137,21 @@ impl Board {
 
         // Piece already in house
         if from >= ring_size {
-            
             // Backward move not allowed in-house
             if backward {
                 return None;
             }
 
-            for pos in (from + 1)..= to {
+            for pos in (from + 1)..=to {
                 passed_tiles.push(pos);
             }
 
             return Some(passed_tiles);
         }
-        
+
         // Moving from the ring into the house
         if to >= ring_size {
-
-            // Backward move into house not allowed 
+            // Backward move into house not allowed
             if backward {
                 return None;
             }
@@ -165,14 +168,14 @@ impl Board {
             // Add first tile in house
             passed_tiles.push(house_gateway);
 
-            for pos in (house_gateway + 1)..= to {
+            for pos in (house_gateway + 1)..=to {
                 passed_tiles.push(pos);
             }
 
             return Some(passed_tiles);
         }
 
-        // Normal ring movement   
+        // Normal ring movement
         for _ in 0..distance {
             current_position = if backward {
                 (current_position + ring_size - 1) % ring_size
@@ -188,8 +191,12 @@ impl Board {
     pub fn is_path_free(&self, path: &[usize]) -> bool {
         for &tile in path {
             if let Some(p) = &self.tiles[tile] {
-                if tile >= self.ring_size { return false; }
-                if !p.left_start { return false; }
+                if tile >= self.ring_size {
+                    return false;
+                }
+                if !p.left_start {
+                    return false;
+                }
             }
         }
 
@@ -210,19 +217,19 @@ impl Board {
         };
 
         let next_ring = (from + 1) % self.ring_size;
-        
+
         match &self.tiles[next_ring] {
             None => options.push(next_ring),
             Some(p) if p.left_start => options.push(next_ring),
-            _ => {},
+            _ => {}
         }
 
         for &player_index in controllable_indices {
-            if self.start_field(player_index) == from && piece.left_start{
+            if self.start_field(player_index) == from && piece.left_start {
                 for house_index in self.house_by_player(player_index) {
                     match &self.tiles[house_index] {
                         None => options.push(house_index),
-                        Some(_) => {},
+                        Some(_) => {}
                     }
                 }
             }
@@ -347,10 +354,7 @@ mod tests {
                 let board = Board::new(players);
 
                 assert_eq!(board.ring_size, players * 16);
-                assert_eq!(
-                    board.tiles.len(),
-                    players * 16 + players * HOUSE_SIZE
-                );
+                assert_eq!(board.tiles.len(), players * 16 + players * HOUSE_SIZE);
             }
         }
 
@@ -377,10 +381,7 @@ mod tests {
                 let board = Board::new(players);
                 let last = board.ring_size - 1;
 
-                assert_eq!(
-                    board.distance_between(last, 0, 0),
-                    Some(1)
-                );
+                assert_eq!(board.distance_between(last, 0, 0), Some(1));
             }
         }
 
@@ -507,21 +508,22 @@ mod tests {
         fn max_path_only_ring_allowed() {
             let mut board = Board::new(4);
 
-            board.tiles[0] = Some(Piece { 
-                owner: 0, left_start: false 
+            board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: false,
             });
 
-            board.tiles[66] = Some(Piece { 
-                owner: 0, 
-                left_start: true 
+            board.tiles[66] = Some(Piece {
+                owner: 0,
+                left_start: true,
             });
 
-            board.tiles[2] = Some(Piece { 
-                owner: 1, 
-                left_start: false 
+            board.tiles[2] = Some(Piece {
+                owner: 1,
+                left_start: false,
             });
 
-            let steps = board.max_path_from(0, &[0,2]);
+            let steps = board.max_path_from(0, &[0, 2]);
             assert_eq!(steps, 1);
         }
 
@@ -529,17 +531,17 @@ mod tests {
         fn max_path_teammate_piece() {
             let mut board = Board::new(4);
 
-            board.tiles[4] = Some(Piece { 
-                owner: 2, 
-                left_start: true 
+            board.tiles[4] = Some(Piece {
+                owner: 2,
+                left_start: true,
             });
 
-            board.tiles[8] = Some(Piece { 
-                owner: 1, 
-                left_start: false 
+            board.tiles[8] = Some(Piece {
+                owner: 1,
+                left_start: false,
             });
 
-            let steps = board.max_path_from(4, &[0,2]);
+            let steps = board.max_path_from(4, &[0, 2]);
             assert_eq!(steps, 3);
         }
     }
@@ -580,7 +582,7 @@ mod tests {
         #[test]
         fn invalid_positions() {
             let board = Board::new(4);
-            
+
             assert_eq!(board.distance_between(80, 0, 0), None);
             assert_eq!(board.distance_between(0, 80, 0), None);
             assert_eq!(board.distance_between(81, 90, 2), None);
@@ -614,38 +616,25 @@ mod tests {
                 );
             }
         }
-
     }
-    
+
     mod passed_tiles_tests {
         use super::*;
 
         #[test]
         fn ring_forward() {
             let board = Board::new(4);
-            
-            assert_eq!(
-                board.passed_tiles(0, 3, 0, false),
-                Some(vec![1, 2, 3])
-            );
-            assert_eq!(
-                board.passed_tiles(62, 2, 0, false),
-                Some(vec![63, 0, 1, 2])
-            );
+
+            assert_eq!(board.passed_tiles(0, 3, 0, false), Some(vec![1, 2, 3]));
+            assert_eq!(board.passed_tiles(62, 2, 0, false), Some(vec![63, 0, 1, 2]));
         }
 
         #[test]
         fn ring_backward() {
             let board = Board::new(4);
-            
-            assert_eq!(
-                board.passed_tiles(3, 0, 0, true),
-                Some(vec![2, 1, 0])
-            );
-            assert_eq!(
-                board.passed_tiles(2, 62, 0, true),
-                Some(vec![1, 0, 63, 62])
-            );
+
+            assert_eq!(board.passed_tiles(3, 0, 0, true), Some(vec![2, 1, 0]));
+            assert_eq!(board.passed_tiles(2, 62, 0, true), Some(vec![1, 0, 63, 62]));
         }
 
         #[test]
@@ -672,36 +661,27 @@ mod tests {
             let board = Board::new(4);
             let house = board.house_by_player(2);
 
-            assert_eq!(
-                board.passed_tiles(house[2], house[1], 2, true),
-                None
-            );
+            assert_eq!(board.passed_tiles(house[2], house[1], 2, true), None);
         }
 
         #[test]
         fn into_house_forward() {
             let board = Board::new(4);
 
-            assert_eq!(
-                board.passed_tiles(62, 64, 0, false),
-                Some(vec![63, 0, 64])
-            );
+            assert_eq!(board.passed_tiles(62, 64, 0, false), Some(vec![63, 0, 64]));
         }
 
         #[test]
         fn into_house_backward() {
             let board = Board::new(4);
 
-            assert_eq!(
-                board.passed_tiles(64, 62, 0, true),
-                None
-            );
+            assert_eq!(board.passed_tiles(64, 62, 0, true), None);
         }
 
         #[test]
         fn invalid_positions() {
             let board = Board::new(4);
-            
+
             assert_eq!(board.passed_tiles(80, 0, 0, false), None);
             assert_eq!(board.passed_tiles(0, 80, 0, false), None);
             assert_eq!(board.passed_tiles(81, 90, 2, false), None);
@@ -728,11 +708,7 @@ mod tests {
         fn passed_tiles_always_end_on_target() {
             let board = Board::new(4);
 
-            let cases = [
-                (0, 5, 0, false),
-                (5, 0, 0, true),
-                (62, 64, 0, false),
-            ];
+            let cases = [(0, 5, 0, false), (5, 0, 0, true), (62, 64, 0, false)];
 
             for (from, to, p, backward) in cases {
                 let passed = board.passed_tiles(from, to, p, backward).unwrap();

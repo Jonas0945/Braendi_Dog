@@ -1,3 +1,3 @@
 pub mod bot;
-pub mod generator;
 pub mod evaluator;
+pub mod generator;

@@ -1,4 +1,4 @@
-use crate::game::{Game};
+use crate::game::Game;
 
 #[derive(Clone, Copy, Debug)]
 pub struct BoardPieceInfo {
@@ -8,7 +8,8 @@ pub struct BoardPieceInfo {
 }
 
 pub fn collect_board_pieces(game: &Game) -> Vec<BoardPieceInfo> {
-    game.board.tiles
+    game.board
+        .tiles
         .iter()
         .enumerate()
         .filter_map(|(position, tile)| {

@@ -1,13 +1,13 @@
-use crate::game::game::GameVariant;
 use crate::game::Game;
 use crate::game::board_view::collect_board_pieces;
+use crate::game::game::GameVariant;
 
 /// Comments by Sebastian Servos
-/// This module defines the evaluation logic for the EvalBot. 
-/// It includes the EvalFeature enum, which represents different aspects of the game state that can be evaluated (e.g. progress towards winning, mobility, risk). 
-/// Each feature has a method to evaluate its score based on the current game state and the bot's perspective. 
-/// The Evaluator struct combines multiple features to assign an overall score to a game state from the perspective of a player. 
-/// The score is used by EvalBot to choose the best action during its turn. 
+/// This module defines the evaluation logic for the EvalBot.
+/// It includes the EvalFeature enum, which represents different aspects of the game state that can be evaluated (e.g. progress towards winning, mobility, risk).
+/// Each feature has a method to evaluate its score based on the current game state and the bot's perspective.
+/// The Evaluator struct combines multiple features to assign an overall score to a game state from the perspective of a player.
+/// The score is used by EvalBot to choose the best action during its turn.
 /// The module also includes helper functions to determine if pieces have legal moves and if they are under threat from opponents.
 
 pub type Score = i32;
@@ -23,9 +23,7 @@ fn piece_has_any_move(game: &Game, from: usize, owner: usize) -> bool {
                 return true;
             }
 
-            if card.is_backward_move_card()
-                && game.can_piece_move_distance(from, dist, true)
-            {
+            if card.is_backward_move_card() && game.can_piece_move_distance(from, dist, true) {
                 return true;
             }
         }
@@ -36,7 +34,13 @@ fn piece_has_any_move(game: &Game, from: usize, owner: usize) -> bool {
 
 // Forward threat: opponent can reach target within 13 tiles
 // Backward threat: opponent can reach target exactly 4 tiles back
-fn is_threat(game: &Game, opponent_position: usize, opponent_index: usize, target_position:usize, target_index: usize) -> bool {
+fn is_threat(
+    game: &Game,
+    opponent_position: usize,
+    opponent_index: usize,
+    target_position: usize,
+    target_index: usize,
+) -> bool {
     let board = &game.board;
 
     if target_position >= board.ring_size {
@@ -56,9 +60,13 @@ fn is_threat(game: &Game, opponent_position: usize, opponent_index: usize, targe
     }
 
     // Check forward moves
-    if let Some(forward_distance) = board.distance_between(opponent_position, target_position, opponent_index) {
+    if let Some(forward_distance) =
+        board.distance_between(opponent_position, target_position, opponent_index)
+    {
         if forward_distance <= 13 {
-            if let Some(forward_path) = board.passed_tiles(opponent_position, target_position, opponent_index, false) {
+            if let Some(forward_path) =
+                board.passed_tiles(opponent_position, target_position, opponent_index, false)
+            {
                 if board.is_path_free(&forward_path) {
                     return true;
                 }
@@ -67,9 +75,13 @@ fn is_threat(game: &Game, opponent_position: usize, opponent_index: usize, targe
     }
 
     // Check backward move
-    if let Some(backward_distance) = board.distance_between(target_position, opponent_position, target_index) {
+    if let Some(backward_distance) =
+        board.distance_between(target_position, opponent_position, target_index)
+    {
         if backward_distance == 4 {
-            if let Some(backward_path) = board.passed_tiles(opponent_position, target_position, opponent_index, true) {
+            if let Some(backward_path) =
+                board.passed_tiles(opponent_position, target_position, opponent_index, true)
+            {
                 if board.is_path_free(&backward_path) {
                     return true;
                 }
@@ -95,12 +107,12 @@ pub struct EvalContext<'a> {
 
 // Aspect of the evaluation that assigns a score to a game state from the perspective of a player.
 enum EvalFeature {
-    HouseProgress,  // Evaluates current pieces_in_house
-    HouseMobility,  // Evaluates if pieces can enter/move in house
-    BoardProgress,  // Evaluates distance towards house_tiles
-    BoardMobility,  // Evaluates if piece is in range of being blocked
-    Risk,           // Evaluates if piece is in range of being captured
-    Teamplay,       // Evaluates if teamplay is more beneficial
+    HouseProgress, // Evaluates current pieces_in_house
+    HouseMobility, // Evaluates if pieces can enter/move in house
+    BoardProgress, // Evaluates distance towards house_tiles
+    BoardMobility, // Evaluates if piece is in range of being blocked
+    Risk,          // Evaluates if piece is in range of being captured
+    Teamplay,      // Evaluates if teamplay is more beneficial
 }
 
 impl EvalFeature {
@@ -128,7 +140,7 @@ impl EvalFeature {
             .iter()
             .filter(|bp| p.opponent_indices.contains(&bp.owner))
             .collect();
-        
+
         match self {
             EvalFeature::HouseProgress => {
                 /*
@@ -138,7 +150,7 @@ impl EvalFeature {
                 */
 
                 let own_house = game.players[p.player_index].pieces_in_house as Score;
-                
+
                 score += own_house * 1000;
 
                 for &partner in &p.partner_indices {
@@ -150,21 +162,21 @@ impl EvalFeature {
                     let count = game.players[opponent].pieces_in_house as Score;
                     score -= count * 800;
                 }
-                
+
                 score
-            },
+            }
 
             EvalFeature::HouseMobility => {
                 /*
                 Every piece is at the correct position: +40
-                Open space between pieces (further up gets worse score): - 25 * depth of tile 
+                Open space between pieces (further up gets worse score): - 25 * depth of tile
                 */
 
                 let house_tiles = game.board.house_by_player(p.player_index);
                 let pieces_in_house = game.players[p.player_index].pieces_in_house as usize;
 
                 if pieces_in_house == 0 {
-                    return score
+                    return score;
                 };
 
                 let mut seen_pieces = 0;
@@ -184,10 +196,10 @@ impl EvalFeature {
                 // Pieces at the correct position
                 if score == 0 {
                     score += 40;
-                } 
+                }
 
                 score
-            },
+            }
 
             EvalFeature::BoardProgress => {
                 /*
@@ -198,14 +210,13 @@ impl EvalFeature {
 
                 for piece in &board_pieces {
                     if piece.position >= ring_size {
-                        continue
+                        continue;
                     };
 
                     let owner = piece.owner;
                     let house_entry = board.start_field(owner);
 
-                    let Some(distance) = 
-                        board.distance_between(piece.position, house_entry, owner)
+                    let Some(distance) = board.distance_between(piece.position, house_entry, owner)
                     else {
                         continue;
                     };
@@ -222,7 +233,7 @@ impl EvalFeature {
                 }
 
                 score
-            },
+            }
 
             EvalFeature::BoardMobility => {
                 /*
@@ -252,12 +263,12 @@ impl EvalFeature {
                 score -= blocked_pieces * 15;
 
                 // Only one piece on board
-                if movable_pieces == 1 && relevant_pieces >= 2  {
+                if movable_pieces == 1 && relevant_pieces >= 2 {
                     score -= 20;
                 }
 
                 score
-            },
+            }
 
             EvalFeature::Risk => {
                 /*
@@ -274,14 +285,20 @@ impl EvalFeature {
                             continue;
                         }
 
-                        if is_threat(game, opponent.position, opponent.owner, own.position, own.owner) {
+                        if is_threat(
+                            game,
+                            opponent.position,
+                            opponent.owner,
+                            own.position,
+                            own.owner,
+                        ) {
                             score -= 40;
                         }
                     }
                 }
 
                 score
-            },
+            }
 
             EvalFeature::Teamplay => {
                 /*
@@ -313,7 +330,13 @@ impl EvalFeature {
                             continue;
                         }
 
-                        if is_threat(game, opponent.position, opponent.owner, partner.position, partner.owner) {
+                        if is_threat(
+                            game,
+                            opponent.position,
+                            opponent.owner,
+                            partner.position,
+                            partner.owner,
+                        ) {
                             threat_count += 1;
                         }
                     }
@@ -326,7 +349,7 @@ impl EvalFeature {
                 }
 
                 score
-            },
+            }
         }
     }
 }
@@ -351,20 +374,16 @@ impl Evaluator {
     }
 
     pub fn evaluate(&self, ctx: &EvalContext) -> Score {
-        self.features
-            .iter()
-            .map(|f| f.evaluate(ctx))
-            .sum()
+        self.features.iter().map(|f| f.evaluate(ctx)).sum()
     }
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::game::GameVariant;
     use crate::game::Piece;
     use crate::game::card::Card;
+    use crate::game::game::GameVariant;
     use crate::game::player::PlayerType;
 
     mod eval_house_progress_tests {
@@ -470,9 +489,8 @@ mod tests {
             let score = feature.evaluate(&context);
 
             assert_eq!(score, -75);
-
         }
-        
+
         #[test]
         fn house_mobility_double_gap() {
             let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
@@ -503,7 +521,6 @@ mod tests {
             let score = feature.evaluate(&context);
 
             assert_eq!(score, -25 - 75);
-
         }
 
         #[test]
@@ -541,7 +558,6 @@ mod tests {
             let score = feature.evaluate(&context);
 
             assert_eq!(score, 40);
-
         }
 
         #[test]
@@ -579,7 +595,6 @@ mod tests {
             let score = feature.evaluate(&context);
 
             assert_eq!(score, -25);
-
         }
 
         #[test]
@@ -617,7 +632,6 @@ mod tests {
             let score = feature.evaluate(&context);
 
             assert_eq!(score, -50);
-
         }
     }
     mod eval_board_progress_tests {
@@ -627,20 +641,20 @@ mod tests {
         fn board_progress_basic_scoring() {
             let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
 
-            game.board.tiles[62] = Some(Piece { 
-                owner: 0, 
-                left_start: true 
+            game.board.tiles[62] = Some(Piece {
+                owner: 0,
+                left_start: true,
             });
 
-            game.board.tiles [20] = Some(Piece { 
-                owner: 2, 
-                left_start: true 
+            game.board.tiles[20] = Some(Piece {
+                owner: 2,
+                left_start: true,
             });
 
-            game.board.tiles [5] = Some(Piece { 
-                owner: 1, 
-                left_start: true 
-            });            
+            game.board.tiles[5] = Some(Piece {
+                owner: 1,
+                left_start: true,
+            });
 
             let context = EvalContext {
                 game: &game,
@@ -665,30 +679,26 @@ mod tests {
         fn board_mobility_basic_scoring() {
             let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
 
-            game.players[0].cards = vec![
-                Card::Two,
-                Card::Three,
-                Card::Five,
-            ];
+            game.players[0].cards = vec![Card::Two, Card::Three, Card::Five];
 
-            game.board.tiles[10] = Some(Piece { 
-                owner: 0, 
-                left_start: true 
+            game.board.tiles[10] = Some(Piece {
+                owner: 0,
+                left_start: true,
             });
 
-            game.board.tiles[20] = Some(Piece { 
-                owner: 0, 
-                left_start: true 
+            game.board.tiles[20] = Some(Piece {
+                owner: 0,
+                left_start: true,
             });
 
-            game.board.tiles[21] = Some(Piece { 
-                owner: 1, 
-                left_start: false 
+            game.board.tiles[21] = Some(Piece {
+                owner: 1,
+                left_start: false,
             });
 
-            game.board.tiles[30] = Some(Piece { 
-                owner: 0, 
-                left_start: true 
+            game.board.tiles[30] = Some(Piece {
+                owner: 0,
+                left_start: true,
             });
 
             let context = EvalContext {
@@ -711,15 +721,11 @@ mod tests {
         fn board_mobility_only_one_piece_penalty() {
             let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
 
-            game.players[0].cards = vec![
-                Card::Two,
-                Card::Three,
-                Card::Five,
-            ];
+            game.players[0].cards = vec![Card::Two, Card::Three, Card::Five];
 
-            game.board.tiles[10] = Some(Piece { 
-                owner: 0, 
-                left_start: true 
+            game.board.tiles[10] = Some(Piece {
+                owner: 0,
+                left_start: true,
             });
 
             let context = EvalContext {
@@ -784,28 +790,26 @@ mod tests {
         fn board_mobility_all_pieces_blocked() {
             let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
 
-            game.players[0].cards = vec![
-                Card::Two,
-            ];
+            game.players[0].cards = vec![Card::Two];
 
-            game.board.tiles[10] = Some(Piece { 
-                owner: 0, 
-                left_start: true 
+            game.board.tiles[10] = Some(Piece {
+                owner: 0,
+                left_start: true,
             });
 
-            game.board.tiles[12] = Some(Piece { 
-                owner: 1, 
-                left_start: false 
+            game.board.tiles[12] = Some(Piece {
+                owner: 1,
+                left_start: false,
             });
 
-            game.board.tiles[20] = Some(Piece { 
-                owner: 0, 
-                left_start: true 
+            game.board.tiles[20] = Some(Piece {
+                owner: 0,
+                left_start: true,
             });
 
-            game.board.tiles[22] = Some(Piece { 
-                owner: 1, 
-                left_start: false 
+            game.board.tiles[22] = Some(Piece {
+                owner: 1,
+                left_start: false,
             });
 
             let context = EvalContext {
@@ -832,10 +836,22 @@ mod tests {
         fn risk_no_threats() {
             let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
 
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true });
-            game.board.tiles[32] = Some(Piece { owner: 1, left_start: true });
-            game.board.tiles[48] = Some(Piece { owner: 2, left_start: true });
-            game.board.tiles[16] = Some(Piece { owner: 3, left_start: true });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+            game.board.tiles[32] = Some(Piece {
+                owner: 1,
+                left_start: true,
+            });
+            game.board.tiles[48] = Some(Piece {
+                owner: 2,
+                left_start: true,
+            });
+            game.board.tiles[16] = Some(Piece {
+                owner: 3,
+                left_start: true,
+            });
 
             let context = EvalContext {
                 game: &game,
@@ -855,8 +871,14 @@ mod tests {
         fn risk_forward_threat() {
             let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
 
-            game.board.tiles[0] = Some(Piece { owner: 1, left_start: true });
-            game.board.tiles[10] = Some(Piece { owner: 0, left_start: true });
+            game.board.tiles[0] = Some(Piece {
+                owner: 1,
+                left_start: true,
+            });
+            game.board.tiles[10] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
 
             let context = EvalContext {
                 game: &game,
@@ -876,8 +898,14 @@ mod tests {
         fn risk_backward_threat() {
             let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
 
-            game.board.tiles[20] = Some(Piece { owner: 0, left_start: true });
-            game.board.tiles[24] = Some(Piece { owner: 1, left_start: true });
+            game.board.tiles[20] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+            game.board.tiles[24] = Some(Piece {
+                owner: 1,
+                left_start: true,
+            });
 
             let context = EvalContext {
                 game: &game,
@@ -897,9 +925,18 @@ mod tests {
         fn risk_multiple_threats() {
             let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
 
-            game.board.tiles[12] = Some(Piece { owner: 0, left_start: true });
-            game.board.tiles[4] = Some(Piece { owner: 1, left_start: true });
-            game.board.tiles[0] = Some(Piece { owner: 3, left_start: true });
+            game.board.tiles[12] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+            game.board.tiles[4] = Some(Piece {
+                owner: 1,
+                left_start: true,
+            });
+            game.board.tiles[0] = Some(Piece {
+                owner: 3,
+                left_start: true,
+            });
 
             let context = EvalContext {
                 game: &game,
@@ -919,10 +956,19 @@ mod tests {
         fn risk_piece_in_house_and_blocked_safe() {
             let mut game = Game::new(GameVariant::TwoVsTwo, vec![PlayerType::Human; 4]);
 
-            game.board.tiles[64] = Some(Piece { owner: 0, left_start: true });
-            game.board.tiles[4] = Some(Piece { owner: 0, left_start: false });
+            game.board.tiles[64] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+            game.board.tiles[4] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
 
-            game.board.tiles[63] = Some(Piece { owner: 1, left_start: true });
+            game.board.tiles[63] = Some(Piece {
+                owner: 1,
+                left_start: true,
+            });
 
             let context = EvalContext {
                 game: &game,
@@ -946,7 +992,10 @@ mod tests {
         fn teamplay_free_for_all_returns_zero() {
             let mut game = Game::new(GameVariant::FreeForAll(4), vec![PlayerType::Human; 4]);
 
-            game.board.tiles[4] = Some(Piece { owner: 0, left_start: false });
+            game.board.tiles[4] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
 
             let context = EvalContext {
                 game: &game,
@@ -1107,7 +1156,6 @@ mod tests {
 
             assert_eq!(score, -10);
         }
-
 
         #[test]
         fn teamplay_piece_block() {

@@ -1,6 +1,5 @@
-use crate::game::{Game, Color, Piece};
 use crate::game::game::DogGame;
-
+use crate::game::{Color, Game, Piece};
 
 pub fn render(game: &Game) {
     clear_screen();
@@ -42,7 +41,6 @@ fn draw_segment(
     house: &[usize],
 ) {
     let label = format!("{:?} ({})", game.players[player_index].color, player_index);
-    
 
     print!("{:<15}: Track: ", label);
 
@@ -85,8 +83,7 @@ fn draw_current_player(game: &Game) {
     println!("Aktiver Spieler: {:?}", p.color);
     println!(
         "Pieces: in house = {}, to place = {}",
-        p.pieces_in_house,
-        p.pieces_to_place
+        p.pieces_in_house, p.pieces_to_place
     );
 
     if let Some(steps_left) = game.split_rest {
@@ -97,7 +94,10 @@ fn draw_current_player(game: &Game) {
         .board_state()
         .iter()
         .enumerate()
-        .filter(|(_, tile)| tile.as_ref().map_or(false, |piece| piece.owner == player_index))
+        .filter(|(_, tile)| {
+            tile.as_ref()
+                .map_or(false, |piece| piece.owner == player_index)
+        })
         .map(|(idx, _)| idx)
         .collect();
 

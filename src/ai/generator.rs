@@ -1,25 +1,27 @@
-use crate::{Action, ActionKind, game::{Game, board::Point, game::GameVariant}};
 use crate::game::card::Card;
+use crate::{
+    Action, ActionKind,
+    game::{Game, board::Point, game::GameVariant},
+};
 
 /// Comments by Sebastian Servos
-/// This module contains functions to generate all legal actions for a given game state. These are used by the EvalBot to evaluate and select the best action. 
-/// The generation is split into different functions for each type of action (place, trade, split, grab, move, interchange) to keep the code organized and maintainable. 
+/// This module contains functions to generate all legal actions for a given game state. These are used by the EvalBot to evaluate and select the best action.
+/// The generation is split into different functions for each type of action (place, trade, split, grab, move, interchange) to keep the code organized and maintainable.
 /// Each function checks the specific rules and conditions for that action type to ensure only legal actions are generated.
-
 
 pub fn generate_all_legal_actions(game: &Game) -> Vec<Action> {
     let mut total_actions = Vec::new();
 
     let player_color = game.current_player().color;
 
-    // Collect & return trade actions 
+    // Collect & return trade actions
     if game.trading_phase {
         total_actions.extend(collect_trade_actions(game));
 
         return total_actions;
     }
 
-    // Collect & return split actions while split_rest is active 
+    // Collect & return split actions while split_rest is active
     if game.split_rest.is_some() {
         total_actions.extend(collect_split_actions(game));
 
@@ -43,11 +45,11 @@ pub fn generate_all_legal_actions(game: &Game) -> Vec<Action> {
     match game.game_variant {
         GameVariant::FreeForAll(_) => {
             total_actions.extend(collect_grab_actions(game));
-        },
-        _ => {},
+        }
+        _ => {}
     }
 
-    // Remove option = no other action possible 
+    // Remove option = no other action possible
     if total_actions.is_empty() {
         for card in &game.current_player().cards {
             let action = Action {
@@ -60,17 +62,18 @@ pub fn generate_all_legal_actions(game: &Game) -> Vec<Action> {
         }
     }
 
-
     total_actions
 }
 
 pub fn collect_place_actions(game: &Game) -> Vec<Action> {
     let mut place_actions = Vec::new();
-    
+
     let player_color = game.current_player().color;
     let player_index = game.current_player_index;
 
-    let place_cards: Vec<Card> = game.current_player().cards
+    let place_cards: Vec<Card> = game
+        .current_player()
+        .cards
         .iter()
         .cloned()
         .filter(|c| c.is_place_card())
@@ -82,10 +85,12 @@ pub fn collect_place_actions(game: &Game) -> Vec<Action> {
             let start_field = game.board.start_field(player_index) as Point;
 
             if !game.board.is_blocked(start_field) {
-                place_actions.push(Action { 
-                    player: player_color, 
-                    card: Some(*card), 
-                    action: ActionKind::Place { target_player: player_index } 
+                place_actions.push(Action {
+                    player: player_color,
+                    card: Some(*card),
+                    action: ActionKind::Place {
+                        target_player: player_index,
+                    },
                 });
             }
         }
@@ -95,11 +100,13 @@ pub fn collect_place_actions(game: &Game) -> Vec<Action> {
                 let teammate_start_field = game.board.start_field(teammate);
 
                 if !game.board.is_blocked(teammate_start_field) {
-                    place_actions.push(Action { 
-                        player: player_color, 
-                        card: Some(*card), 
-                        action: ActionKind::Place { target_player: teammate } 
-                    });    
+                    place_actions.push(Action {
+                        player: player_color,
+                        card: Some(*card),
+                        action: ActionKind::Place {
+                            target_player: teammate,
+                        },
+                    });
                 }
             }
         }
@@ -126,13 +133,15 @@ pub fn collect_trade_actions(game: &Game) -> Vec<Action> {
                     let action = Action {
                         player: player_color,
                         card: None,
-                        action: crate::ActionKind::TradeGrab { target_card: card_index }
+                        action: crate::ActionKind::TradeGrab {
+                            target_card: card_index,
+                        },
                     };
 
                     trade_actions.push(action);
                 }
             }
-        },
+        }
 
         _ => {
             for card in &game.current_player().cards {
@@ -144,7 +153,7 @@ pub fn collect_trade_actions(game: &Game) -> Vec<Action> {
 
                 trade_actions.push(action);
             }
-        },
+        }
     }
 
     trade_actions
@@ -157,7 +166,9 @@ pub fn collect_split_actions(game: &Game) -> Vec<Action> {
     let player_color = game.current_player().color;
     let player_index = game.current_player_index;
 
-    let split_cards: Vec<Card> = game.current_player().cards
+    let split_cards: Vec<Card> = game
+        .current_player()
+        .cards
         .iter()
         .cloned()
         .filter(|c| *c == Card::Seven)
@@ -182,8 +193,8 @@ pub fn collect_split_actions(game: &Game) -> Vec<Action> {
 
             let range = match piece.left_start {
                 false => game.board.ring_size,
-                true => game.board.tiles.len()
-            };      
+                true => game.board.tiles.len(),
+            };
 
             for to in 0..range {
                 let Some(distance) = game.board.distance_between(from, to, piece.owner) else {
@@ -206,12 +217,10 @@ pub fn collect_split_actions(game: &Game) -> Vec<Action> {
 
                 split_actions.push(action);
             }
-        }   
+        }
     }
-    
 
     split_actions
-
 }
 
 pub fn collect_grab_actions(game: &Game) -> Vec<Action> {
@@ -220,7 +229,9 @@ pub fn collect_grab_actions(game: &Game) -> Vec<Action> {
     let player_color = game.current_player().color;
     let player_index = game.current_player_index;
 
-    let grab_cards: Vec<Card> = game.current_player().cards
+    let grab_cards: Vec<Card> = game
+        .current_player()
+        .cards
         .iter()
         .cloned()
         .filter(|c| *c == Card::Two)
@@ -229,19 +240,19 @@ pub fn collect_grab_actions(game: &Game) -> Vec<Action> {
     for grab_card in grab_cards {
         for (target_index, target_player) in game.players.iter().enumerate() {
             if target_index == player_index {
-                continue
+                continue;
             };
 
             let target_color = target_player.color;
 
             for target_card_index in 0..target_player.cards.len() {
-                grab_actions.push(Action { 
-                    player: player_color, 
-                    card: Some(grab_card), 
-                    action: ActionKind::Grab { 
+                grab_actions.push(Action {
+                    player: player_color,
+                    card: Some(grab_card),
+                    action: ActionKind::Grab {
                         target_player: target_color,
-                        target_card: target_card_index,    
-                    }, 
+                        target_card: target_card_index,
+                    },
                 });
             }
         }
@@ -256,7 +267,9 @@ pub fn collect_forward_move_actions(game: &Game) -> Vec<Action> {
     let player_color = game.current_player().color;
     let player_index = game.current_player_index;
 
-    let forward_move_cards: Vec<Card> = game.current_player().cards
+    let forward_move_cards: Vec<Card> = game
+        .current_player()
+        .cards
         .iter()
         .cloned()
         .filter(|c| c.is_forward_move_card())
@@ -264,7 +277,6 @@ pub fn collect_forward_move_actions(game: &Game) -> Vec<Action> {
 
     for card in forward_move_cards {
         for dist in card.possible_distances() {
-
             for (from, tile) in game.board.tiles.iter().enumerate() {
                 let Some(piece) = tile else { continue };
                 if !game.can_control_piece(player_index, piece.owner) {
@@ -277,8 +289,8 @@ pub fn collect_forward_move_actions(game: &Game) -> Vec<Action> {
 
                 let range = match piece.left_start {
                     false => game.board.ring_size,
-                    true => game.board.tiles.len()
-                }; 
+                    true => game.board.tiles.len(),
+                };
 
                 for to in 0..range {
                     if game.board.distance_between(from, to, piece.owner) != Some(dist) {
@@ -308,7 +320,9 @@ pub fn collect_backward_move_actions(game: &Game) -> Vec<Action> {
     let player_color = game.current_player().color;
     let player_index = game.current_player_index;
 
-    let backward_move_cards: Vec<Card> = game.current_player().cards
+    let backward_move_cards: Vec<Card> = game
+        .current_player()
+        .cards
         .iter()
         .cloned()
         .filter(|c| c.is_backward_move_card())
@@ -316,14 +330,13 @@ pub fn collect_backward_move_actions(game: &Game) -> Vec<Action> {
 
     for card in backward_move_cards {
         for (from, tile) in game.board.tiles.iter().enumerate() {
-
             // Cannot move backwards in-house
             if from >= game.board.ring_size {
                 continue;
             }
-            
+
             let Some(piece) = tile else { continue };
-            
+
             if !game.can_control_piece(player_index, piece.owner) {
                 continue;
             }
@@ -339,7 +352,7 @@ pub fn collect_backward_move_actions(game: &Game) -> Vec<Action> {
                 player: player_color,
                 card: Some(card),
                 action: ActionKind::Move { from, to },
-            }); 
+            });
         }
     }
 
@@ -352,16 +365,16 @@ pub fn collect_interchange_actions(game: &Game) -> Vec<Action> {
     let player_color = game.current_player().color;
     let player_index = game.current_player_index;
 
-    let interchange_cards: Vec<Card> = game.current_player().cards
+    let interchange_cards: Vec<Card> = game
+        .current_player()
+        .cards
         .iter()
         .cloned()
         .filter(|c| c.is_interchange_card())
         .collect();
 
-
     for card in interchange_cards {
         for (a_index, a_tile) in game.board.tiles.iter().enumerate() {
-            
             if a_index >= game.board.ring_size {
                 continue;
             }
@@ -399,12 +412,14 @@ pub fn collect_interchange_actions(game: &Game) -> Vec<Action> {
                 interchange_actions.push(Action {
                     player: player_color,
                     card: Some(card),
-                    action: ActionKind::Interchange { a: a_index, b: b_index },
+                    action: ActionKind::Interchange {
+                        a: a_index,
+                        b: b_index,
+                    },
                 });
             }
         }
     }
-
 
     interchange_actions
 }
@@ -473,7 +488,7 @@ mod tests {
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Two];
-            
+
             let actions = collect_place_actions(&game);
 
             assert_eq!(actions.len(), 0);
@@ -487,13 +502,11 @@ mod tests {
             game.players[0].pieces_to_place = 0;
             game.players[0].pieces_in_house = 3;
             game.players[0].cards = vec![Card::Ace];
-            
+
             let actions = collect_place_actions(&game);
 
             assert_eq!(actions.len(), 0);
         }
-
-
 
         #[test]
         fn team_place_free_field() {
@@ -530,7 +543,7 @@ mod tests {
             game.players[0].pieces_to_place = 0;
             game.players[0].pieces_in_house = 4;
             game.players[0].cards = vec![Card::Two];
-            
+
             let actions = collect_place_actions(&game);
 
             assert_eq!(actions.len(), 0);
@@ -591,7 +604,7 @@ mod tests {
             let actions = collect_place_actions(&game);
 
             assert_eq!(actions.len(), 1);
-        }    
+        }
     }
 
     mod collect_trade_tests {
@@ -628,11 +641,7 @@ mod tests {
 
             assert_eq!(actions.len(), 3);
 
-            let expected = vec![
-                (1, 0),
-                (1, 1),
-                (2, 0),
-            ];
+            let expected = vec![(1, 0), (1, 1), (2, 0)];
 
             for (i, action) in actions.iter().enumerate() {
                 assert_eq!(action.player, game.player_by_index(0).color);
@@ -663,7 +672,7 @@ mod tests {
             assert_eq!(action.card, Some(Card::Ace));
 
             match action.action {
-                ActionKind::Trade => {},
+                ActionKind::Trade => {}
                 _ => panic!("Expected Trade"),
             }
         }
@@ -679,14 +688,19 @@ mod tests {
 
             assert_eq!(actions.len(), 2);
 
-            
             assert_eq!(actions[0].player, game.player_by_index(0).color);
             assert_eq!(actions[0].card, Some(Card::Ace));
-            if let ActionKind::Trade = actions[0].action {} else { panic!("Expected Trade"); }
+            if let ActionKind::Trade = actions[0].action {
+            } else {
+                panic!("Expected Trade");
+            }
 
             assert_eq!(actions[1].player, game.player_by_index(0).color);
             assert_eq!(actions[1].card, Some(Card::Joker));
-            if let ActionKind::Trade = actions[1].action {} else { panic!("Expected Trade"); }
+            if let ActionKind::Trade = actions[1].action {
+            } else {
+                panic!("Expected Trade");
+            }
         }
 
         #[test]
@@ -722,7 +736,10 @@ mod tests {
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Seven];
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true }); // now has 11 Options (7 ring + 4 in-house)
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            }); // now has 11 Options (7 ring + 4 in-house)
 
             let actions = collect_split_actions(&game);
 
@@ -749,7 +766,10 @@ mod tests {
             game.split_rest = Some(4);
 
             game.players[0].cards = vec![Card::Seven];
-            game.board.tiles[1] = Some(Piece { owner: 0, left_start: false });
+            game.board.tiles[1] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
 
             let actions = collect_split_actions(&game);
 
@@ -763,7 +783,10 @@ mod tests {
             game.split_rest = Some(4);
 
             game.players[0].cards = vec![Card::Seven];
-            game.board.tiles[1] = Some(Piece { owner: 0, left_start: true });
+            game.board.tiles[1] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
 
             let actions = collect_split_actions(&game);
 
@@ -912,7 +935,10 @@ mod tests {
             assert_eq!(action.card, Some(Card::Two));
 
             match action.action {
-                ActionKind::Grab { target_player, target_card } => {
+                ActionKind::Grab {
+                    target_player,
+                    target_card,
+                } => {
                     assert_eq!(target_player, game.players[1].color);
                     assert_eq!(target_card, 0);
                 }
@@ -934,7 +960,10 @@ mod tests {
 
             for action in actions {
                 match action.action {
-                    ActionKind::Grab { target_player, target_card } => {
+                    ActionKind::Grab {
+                        target_player,
+                        target_card,
+                    } => {
                         assert_eq!(target_player, game.players[1].color);
                         assert!(target_card < 3);
                     }
@@ -1009,19 +1038,26 @@ mod tests {
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Ace];
-            game.board.tiles[0] = Some(Piece { 
-                owner: 0, 
-                left_start: false });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
 
             let actions = collect_forward_move_actions(&game);
 
             assert!(actions.len() == 2);
             assert_eq!(actions[0].player, game.current_player().color);
             assert_eq!(actions[0].card, Some(Card::Ace));
-            assert!(matches!(actions[0].action, ActionKind::Move { from: 0, to: 1 }));
+            assert!(matches!(
+                actions[0].action,
+                ActionKind::Move { from: 0, to: 1 }
+            ));
             assert_eq!(actions[1].player, game.current_player().color);
             assert_eq!(actions[1].card, Some(Card::Ace));
-            assert!(matches!(actions[1].action, ActionKind::Move { from: 0, to: 11 }));
+            assert!(matches!(
+                actions[1].action,
+                ActionKind::Move { from: 0, to: 11 }
+            ));
         }
 
         #[test]
@@ -1030,22 +1066,32 @@ mod tests {
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Ace];
-            game.board.tiles[0] = Some(Piece { 
-                owner: 0, 
-                left_start: true });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
 
             let actions = collect_forward_move_actions(&game);
 
             assert!(actions.len() == 3);
             assert_eq!(actions[0].player, game.current_player().color);
             assert_eq!(actions[0].card, Some(Card::Ace));
-            assert!(matches!(actions[0].action, ActionKind::Move { from: 0, to: 1 }));
+            assert!(matches!(
+                actions[0].action,
+                ActionKind::Move { from: 0, to: 1 }
+            ));
             assert_eq!(actions[1].player, game.current_player().color);
             assert_eq!(actions[1].card, Some(Card::Ace));
-            assert!(matches!(actions[1].action, ActionKind::Move { from: 0, to: 32 }));
+            assert!(matches!(
+                actions[1].action,
+                ActionKind::Move { from: 0, to: 32 }
+            ));
             assert_eq!(actions[2].player, game.current_player().color);
             assert_eq!(actions[2].card, Some(Card::Ace));
-            assert!(matches!(actions[2].action, ActionKind::Move { from: 0, to: 11 }));
+            assert!(matches!(
+                actions[2].action,
+                ActionKind::Move { from: 0, to: 11 }
+            ));
         }
 
         #[test]
@@ -1053,14 +1099,26 @@ mod tests {
             let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
             game.players[0].cards = vec![Card::Two];
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
-            game.board.tiles[5] = Some(Piece { owner: 0, left_start: false });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
+            game.board.tiles[5] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
 
             let actions = collect_forward_move_actions(&game);
 
             assert!(actions.len() == 2);
-            assert!(matches!(actions[0].action, ActionKind::Move { from: 0, to: 2 }));
-            assert!(matches!(actions[1].action, ActionKind::Move { from: 5, to: 7 }));
+            assert!(matches!(
+                actions[0].action,
+                ActionKind::Move { from: 0, to: 2 }
+            ));
+            assert!(matches!(
+                actions[1].action,
+                ActionKind::Move { from: 5, to: 7 }
+            ));
         }
 
         #[test]
@@ -1068,8 +1126,14 @@ mod tests {
             let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
             game.players[0].cards = vec![Card::Ace];
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
-            game.board.tiles[1] = Some(Piece { owner: 1, left_start: false });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
+            game.board.tiles[1] = Some(Piece {
+                owner: 1,
+                left_start: false,
+            });
 
             let actions = collect_forward_move_actions(&game);
 
@@ -1081,7 +1145,10 @@ mod tests {
             let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
             game.players[0].cards = vec![Card::Joker];
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
 
             let actions = collect_forward_move_actions(&game);
 
@@ -1096,8 +1163,14 @@ mod tests {
             let mut game = Game::new(GameVariant::FreeForAll(2), vec![PlayerType::Human; 2]);
             game.trading_phase = false;
             game.players[0].cards = vec![Card::Ace];
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
-            game.board.tiles[12] = Some(Piece { owner: 1, left_start: false });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
+            game.board.tiles[12] = Some(Piece {
+                owner: 1,
+                left_start: false,
+            });
 
             let actions = collect_forward_move_actions(&game);
             assert!(actions.len() == 2);
@@ -1113,16 +1186,20 @@ mod tests {
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Four];
-            game.board.tiles[0] = Some(Piece { 
-                owner: 0, 
-                left_start: false });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
 
             let actions = collect_backward_move_actions(&game);
 
             assert!(actions.len() == 1);
             assert_eq!(actions[0].player, game.current_player().color);
             assert_eq!(actions[0].card, Some(Card::Four));
-            assert!(matches!(actions[0].action, ActionKind::Move { from: 0, to: 28 }));
+            assert!(matches!(
+                actions[0].action,
+                ActionKind::Move { from: 0, to: 28 }
+            ));
         }
 
         #[test]
@@ -1131,14 +1208,28 @@ mod tests {
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Joker];
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
-            game.board.tiles[5] = Some(Piece { owner: 0, left_start: false });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
+            game.board.tiles[5] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
 
             let actions = collect_backward_move_actions(&game);
 
             assert_eq!(actions.len(), 2);
-            assert!(actions.iter().any(|a| matches!(a.action, ActionKind::Move { from: 0, to: 28 })));
-            assert!(actions.iter().any(|a| matches!(a.action, ActionKind::Move { from: 5, to: 1 })));
+            assert!(
+                actions
+                    .iter()
+                    .any(|a| matches!(a.action, ActionKind::Move { from: 0, to: 28 }))
+            );
+            assert!(
+                actions
+                    .iter()
+                    .any(|a| matches!(a.action, ActionKind::Move { from: 5, to: 1 }))
+            );
         }
 
         #[test]
@@ -1147,8 +1238,14 @@ mod tests {
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Four];
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
-            game.board.tiles[28] = Some(Piece { owner: 1, left_start: false });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
+            game.board.tiles[28] = Some(Piece {
+                owner: 1,
+                left_start: false,
+            });
 
             let actions = collect_backward_move_actions(&game);
 
@@ -1161,12 +1258,18 @@ mod tests {
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Four];
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
 
             let actions = collect_backward_move_actions(&game);
 
             assert_eq!(actions.len(), 1);
-            assert!(matches!(actions[0].action, ActionKind::Move { from: 0, to: 28 }));
+            assert!(matches!(
+                actions[0].action,
+                ActionKind::Move { from: 0, to: 28 }
+            ));
         }
 
         #[test]
@@ -1175,12 +1278,18 @@ mod tests {
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Four, Card::Four];
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
 
             let actions = collect_backward_move_actions(&game);
 
             assert_eq!(actions.len(), 2);
-            assert!(matches!(actions[0].action, ActionKind::Move { from: 0, to: 28 }));
+            assert!(matches!(
+                actions[0].action,
+                ActionKind::Move { from: 0, to: 28 }
+            ));
         }
 
         #[test]
@@ -1189,12 +1298,18 @@ mod tests {
             game.trading_phase = false;
 
             game.players[0].cards = vec![Card::Joker];
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: false });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            });
 
             let actions = collect_backward_move_actions(&game);
 
             assert_eq!(actions.len(), 1);
-            assert!(matches!(actions[0].action, ActionKind::Move { from: 0, to: 28 }));
+            assert!(matches!(
+                actions[0].action,
+                ActionKind::Move { from: 0, to: 28 }
+            ));
         }
 
         #[test]
@@ -1204,7 +1319,10 @@ mod tests {
 
             game.players[0].cards = vec![Card::Four];
             game.board.tiles[0] = None;
-            game.board.tiles[32] = Some(Piece { owner: 0, left_start: false }); // In-house
+            game.board.tiles[32] = Some(Piece {
+                owner: 0,
+                left_start: false,
+            }); // In-house
 
             let actions = collect_backward_move_actions(&game);
 
@@ -1222,7 +1340,10 @@ mod tests {
 
             game.players[0].cards = vec![Card::Jack];
 
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
 
             let actions = collect_interchange_actions(&game);
             assert_eq!(actions.len(), 0);
@@ -1235,16 +1356,28 @@ mod tests {
 
             game.players[0].cards = vec![Card::Jack];
 
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true }); 
-            game.board.tiles[4] = Some(Piece { owner: 2, left_start: true }); 
-            game.board.tiles[7] = Some(Piece { owner: 1, left_start: true }); 
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+            game.board.tiles[4] = Some(Piece {
+                owner: 2,
+                left_start: true,
+            });
+            game.board.tiles[7] = Some(Piece {
+                owner: 1,
+                left_start: true,
+            });
 
             let actions = collect_interchange_actions(&game);
 
             assert_eq!(actions.len(), 2);
             assert_eq!(actions[0].player, game.current_player().color);
             assert_eq!(actions[0].card, Some(Card::Jack));
-            assert!(matches!(actions[0].action, ActionKind::Interchange { a: 0, b: 4 }));
+            assert!(matches!(
+                actions[0].action,
+                ActionKind::Interchange { a: 0, b: 4 }
+            ));
         }
 
         #[test]
@@ -1254,8 +1387,14 @@ mod tests {
 
             game.players[0].cards = vec![Card::Jack];
 
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true }); 
-            game.board.tiles[4] = Some(Piece { owner: 0, left_start: true });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+            game.board.tiles[4] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
 
             let actions = collect_interchange_actions(&game);
 
@@ -1269,9 +1408,18 @@ mod tests {
 
             game.players[0].cards = vec![Card::Jack];
 
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true }); 
-            game.board.tiles[4] = Some(Piece { owner: 1, left_start: false });
-            game.board.tiles[68] = Some(Piece { owner: 1, left_start: true });
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+            game.board.tiles[4] = Some(Piece {
+                owner: 1,
+                left_start: false,
+            });
+            game.board.tiles[68] = Some(Piece {
+                owner: 1,
+                left_start: true,
+            });
 
             let actions = collect_interchange_actions(&game);
 
@@ -1285,9 +1433,18 @@ mod tests {
 
             game.players[0].cards = vec![Card::Jack];
 
-            game.board.tiles[0] = Some(Piece { owner: 0, left_start: true }); 
-            game.board.tiles[4] = Some(Piece { owner: 0, left_start: true }); 
-            game.board.tiles[7] = Some(Piece { owner: 1, left_start: true }); 
+            game.board.tiles[0] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+            game.board.tiles[4] = Some(Piece {
+                owner: 0,
+                left_start: true,
+            });
+            game.board.tiles[7] = Some(Piece {
+                owner: 1,
+                left_start: true,
+            });
 
             let actions = collect_interchange_actions(&game);
 
@@ -1301,8 +1458,14 @@ mod tests {
 
             game.players[0].cards = vec![Card::Jack];
 
-            game.board.tiles[1] = Some(Piece { owner: 1, left_start: true });
-            game.board.tiles[3] = Some(Piece { owner: 2, left_start: true });
+            game.board.tiles[1] = Some(Piece {
+                owner: 1,
+                left_start: true,
+            });
+            game.board.tiles[3] = Some(Piece {
+                owner: 2,
+                left_start: true,
+            });
 
             let actions = collect_interchange_actions(&game);
             assert_eq!(actions.len(), 0);
@@ -1316,8 +1479,14 @@ mod tests {
             game.players[0].cards = vec![Card::Jack];
             game.players[0].pieces_in_house = 4;
 
-            game.board.tiles[1] = Some(Piece { owner: 1, left_start: true });
-            game.board.tiles[3] = Some(Piece { owner: 2, left_start: true });
+            game.board.tiles[1] = Some(Piece {
+                owner: 1,
+                left_start: true,
+            });
+            game.board.tiles[3] = Some(Piece {
+                owner: 2,
+                left_start: true,
+            });
 
             let actions = collect_interchange_actions(&game);
             assert_eq!(actions.len(), 1);
