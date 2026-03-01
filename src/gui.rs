@@ -1617,41 +1617,6 @@ SONDERREGELN AUF DEM BRETT
         .into()
     }
 
-    fn debug_view(&self, scale: f32) -> Element<'_, Message> {
-        let font_size = 14.0 * scale;
-        let game_debug = if let Some(game) = &self.game {
-            column![
-                text("GAME").size(font_size).style(IcedColor::WHITE),
-                text(format!("round: {}", game.round))
-                    .size(font_size)
-                    .style(IcedColor::from_rgb(0.8, 0.8, 0.8)),
-                text(format!("trading_phase: {}", game.trading_phase))
-                    .size(font_size)
-                    .style(IcedColor::from_rgb(0.8, 0.8, 0.8)),
-                text(format!("current_player: {}", game.current_player_index))
-                    .size(font_size)
-                    .style(IcedColor::from_rgb(0.8, 0.8, 0.8)),
-            ]
-            .spacing(4.0 * scale)
-        } else {
-            column![text("GAME: none").size(font_size)].spacing(4.0 * scale)
-        };
-        column![
-            text("DEBUG").size(16.0 * scale).style(IcedColor::WHITE),
-            text(format!("sel_card: {:?}", self.selected_card))
-                .size(font_size)
-                .style(IcedColor::from_rgb(0.8, 0.8, 0.8)),
-            text(format!("pending: {:?}", self.pending_action))
-                .size(font_size)
-                .style(IcedColor::from_rgb(0.8, 0.8, 0.8)),
-            text("----------------")
-                .size(font_size)
-                .style(IcedColor::from_rgb(0.5, 0.5, 0.5)),
-            game_debug,
-        ]
-        .spacing(4.0 * scale)
-        .into()
-    }
 
 
 
@@ -1878,20 +1843,7 @@ SONDERREGELN AUF DEM BRETT
 
         column![
             info,
-            btns,
-            container(self.debug_view(scale))
-                .padding(10.0 * scale)
-                .style(move |_: &Theme| container::Appearance {
-                    background: Some(iced::Background::Color(IcedColor::from_rgba(
-                        0.0, 0.0, 0.0, 0.3
-                    ))),
-                    text_color: Some(IcedColor::from_rgb(0.7, 0.7, 0.7)),
-                    border: iced::Border {
-                        radius: (5.0 * scale).into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
+            btns
         ]
         .spacing(30.0 * scale)
         .into()

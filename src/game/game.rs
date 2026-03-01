@@ -310,13 +310,19 @@ impl Game {
 
     // Return first teammate that is not the player himself
     pub fn teammate_index(&self, player_index: usize) -> Option<usize> {
-        if let Some(teams) = &self.teams {
-            for team in teams {
-                if team.contains(&player_index) {
-                    return team.iter().find(|&&i| i != player_index).copied();
+        let teams = self.teams.as_ref()?;
+
+        for team in teams {
+            if let Some(pos) = team.iter().position(|&i| i == player_index) {
+                if team.len() <= 1 {
+                    return None;
                 }
+
+                let next_pos = (pos + 1) % team.len();
+                return Some(team[next_pos]);
             }
         }
+
         None
     }
 
