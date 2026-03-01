@@ -37,41 +37,41 @@
 		Spiel Beitreten klicken
 	3.3 Internet – Port-Forwarding
 
-	Router-Oberfläche öffnen (meist 192.168.1.1)
-	Port-Forwarding Regel: TCP, externer Port 8333, interner Port 8333, interne IP = LAN-IP des Host-PCs
-	Öffentliche IP auf whatismyip.com nachschauen
-	Diese IP + Port (z.B. 85.123.45.67:8333) an Mitspieler weitergeben
+	- Router-Oberfläche öffnen (meist 192.168.1.1)
+	- Port-Forwarding Regel: TCP, externer Port 8333, interner Port 8333, interne IP = LAN-IP des Host-PCs
+	- Öffentliche IP auf whatismyip.com nachschauen
+	- Diese IP + Port (z.B. 85.123.45.67:8333) an Mitspieler weitergeben
 	3.4 Internet – bore
 
-	cargo install bore-cli einmalig installieren
-	Vor dem Spielen in separatem Terminal: bore local 8333 --to bore.pub
-	bore zeigt z.B. listening at bore.pub:54321 – diese Adresse aus dem Terminal kopieren und an Mitspieler weitergeben
-	Im Spiel normal "Spiel Hosten" klicken
-	Mitspieler tragen bore.pub:54321 ins Join-Feld ein
-	bore-Fenster offen lassen solange gespielt wird – Port ändert sich bei jedem Neustart
+	- cargo install bore-cli einmalig installieren
+	- Vor dem Spielen in separatem Terminal: bore local 8333 --to bore.pub
+	- bore zeigt z.B. listening at bore.pub:54321 – diese Adresse aus dem Terminal kopieren und an Mitspieler weitergeben
+	- Im Spiel normal "Spiel Hosten" klicken
+	- Mitspieler tragen bore.pub:54321 ins Join-Feld ein
+	- bore-Fenster offen lassen solange gespielt wird – Port ändert sich bei jedem Neustart
 
 
 	4.2 Bots
 
-	Zufalls-Bot: Wählt zufällig einen gültigen Zug aus allen möglichen
-	Eval-Bot: Bewertet alle möglichen Züge mit einer Funktion und wählt den besten
+	- Zufalls-Bot: Wählt zufällig einen gültigen Zug aus allen möglichen
+	- Eval-Bot: Bewertet alle möglichen Züge mit einer Funktion und wählt den besten
 
 
 	5. Bedienung
 
-	Karte unten anklicken → hebt sich hervor
-	Aktion rechts wählen (Move, Place, Interchange, Remove, Trade...)
-	Bei Move: Startfeld mit Figue anklicken → Markierungen erscheinen → Zielfeld anklicken
-	Bei Place: einfach "Legen" klicken, keine Feldauswahl nötig
-	Bei Interchange: zwei Felder nacheinander anklicken
-	Karte abwerfen: "Abwerfen (Remove)" wenn kein Zug möglich
-	Aktion abbrechen: "Abbrechen" Button rechts
+	- Karte unten anklicken → hebt sich hervor
+	- Aktion rechts wählen (Move, Place, Interchange, Remove, Trade...)
+	- Bei Move: Startfeld mit Figue anklicken → Markierungen erscheinen → Zielfeld anklicken
+	- Bei Place: einfach "Legen" klicken, keine Feldauswahl nötig
+	- Bei Interchange: zwei Felder nacheinander anklicken
+	- Karte abwerfen: "Abwerfen (Remove)" wenn kein Zug möglich
+	- Aktion abbrechen: "Abbrechen" Button rechts
 
 
 	6. Troubleshooting
 
-	Verbindung fehlgeschlagen → IP/Port prüfen, Firewall auf Host-PC prüfen
-	Warte auf Brettdaten bleibt stehen → zurück zum Menü, neu verbinden
-	Kein Ton → lobby.mp3/win.mp3 fehlen, Spiel läuft trotzdem
-	bore-Port ändert sich → bore neu starten, neue Nummer weitergeben
-	cargo run langsam → cargo run --release verwenden
+	- Verbindung fehlgeschlagen → IP/Port prüfen, Firewall auf Host-PC prüfen
+	- Warte auf Brettdaten bleibt stehen → zurück zum Menü, neu verbinden
+	- Kein Ton → lobby.mp3/win.mp3 fehlen, Spiel läuft trotzdem
+	- bore-Port ändert sich → bore neu starten, neue Nummer weitergeben
+	- cargo run langsam → cargo run --release verwenden
