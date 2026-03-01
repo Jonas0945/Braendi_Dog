@@ -1,13 +1,9 @@
-// src/lib.rs
 pub mod ai;
 pub mod game;
 pub mod net;
 pub mod ui;
 pub mod gui;
-
 pub use net::*;
-
-//pub mod bin;
 pub use game::action::{Action, ActionKind};
 pub use game::card::Card;
 pub use game::color::Color;
