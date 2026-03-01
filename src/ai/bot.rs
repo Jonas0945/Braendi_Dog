@@ -8,11 +8,20 @@ use crate::Action;
 use crate::ai::evaluator::{Evaluator, EvalContext, EvalPerspective, Score};
 use crate::ai::generator::*;
 
+/// Comments by Sebastian Servos
+/// This module defines the Bot trait and two implementations: RandomBot and EvalBot. 
+/// The Bot trait has a method choose_action that takes the current game state and a list of legal actions, and returns the chosen action. 
+/// RandomBot simply selects a random action from the list, while EvalBot simulates each possible action, evaluates the resulting game state using a heuristic evaluator, and selects the action with the highest score. 
+/// EvalBot also handles the trading phase by simulating partner actions for each traded card. 
+/// If no action can be chosen (e.g. all simulations fail), it falls back to selecting the first available action.
+
 pub trait Bot {
     fn new() -> Self;
 
+    // Returns the chosen action, or None if no actions are available.
     fn choose_action(&mut self, game: &mut Game, actions: Vec<Action>) -> Option<Action>;
 }
+
 
 pub struct RandomBot {
     rng: ThreadRng,
