@@ -13,6 +13,7 @@ pub enum PlayerType{
 pub struct Player {
     pub player_type: PlayerType,
     pub color: Color,
+    pub name: String, 
     pub pieces_to_place: u8,
     pub pieces_in_house: u8,
     pub cards: Vec<Card>, 
@@ -20,9 +21,16 @@ pub struct Player {
 
 impl Player {
     pub fn new(color: Color, player_type: PlayerType) -> Self {
+        let name = match player_type {
+            PlayerType::Human => "Wartet...".to_string(),
+            PlayerType::RandomBot => "Zufalls-Bot".to_string(),
+            PlayerType::EvalBot => "Schlauer Bot".to_string(),
+        };
+
         Self {
             player_type,
             color,
+            name,
             pieces_to_place: 4,
             pieces_in_house: 0,
             cards: Vec::new(),
