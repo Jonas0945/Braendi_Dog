@@ -21,6 +21,7 @@ use std::net::UdpSocket;
 use std::sync::Arc;
 use std::time::Instant;
 // ist da um die Netzwerkverbindung zu speicehr, damit wir immer sicher zugreifen könen n
+//Arc<Mutex> weil der server und somit auch der Netzwerk-Read-Loop async sind während die Iced-GUI synchroner Update Loop müssen beide potenziell gelichzeitig auf den Sockel zugreifen
 type SharedClient = Arc<tokio::sync::Mutex<Client>>;
 //GUI start
 pub fn launch() -> iced::Result {
@@ -33,6 +34,7 @@ pub fn launch() -> iced::Result {
     })
 }
 // Startet den Server im Background und findet die Wlan-IP von einem damit die Mates beitreten können
+//übe UDP Socket einen Fake-Connect zu Google(8.8.8.8) um die eigene LAN-IP zubekommen
 async fn start_server(addr: String) -> Result<String, String> {
     let server = GameServer::new();
     server
@@ -101,7 +103,7 @@ enum GameAction {
     TradeGrab,
     Undo,
 }
-//wichtig für den zB Split speichert eine action die noch nicht done ist
+//wichtig für den zB Split speichert eine action die noch nicht done ist(verschachtelte Actions)
 #[derive(Debug, Clone)]
 enum PendingAction {
     Move { from: Option<usize> },
@@ -279,7 +281,7 @@ impl Application for DogApp {
                     }
                 }
             }
-
+            // es wird dem abonniert asynced Netzwerk Packages werden über einen Iced-Channel um keine Network Blocks in der UI zu haben
             let net_sub = iced::subscription::channel(
                 std::any::TypeId::of::<braendi_dog::ServerNachrich>(),
                 100,
