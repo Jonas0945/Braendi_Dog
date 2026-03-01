@@ -1,20 +1,16 @@
-use super::color::Color;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Piece {
-    pub color: Color,
+    pub owner: usize,
     pub left_start: bool,
 }
 
 impl Piece {
-    pub fn new(color: Color) -> Self {
+    pub fn new(owner: usize) -> Self {
         Self {
-            color,
+            owner,
             left_start: false,
         }
-    }
-
-    pub fn color(&self) -> Color {
-        self.color
     }
 }

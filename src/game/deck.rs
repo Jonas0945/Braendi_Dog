@@ -1,9 +1,10 @@
 use rand::seq::SliceRandom;
 use rand::rng;
+use serde::{Serialize, Deserialize};
 
 use super::card::Card;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Deck {
     cards: Vec<Card>,
 }
