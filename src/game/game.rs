@@ -8,7 +8,7 @@ use super::card::*;
 use super::color::*;
 use super::deck::*;
 use super::history::*;
-use super::piece::*;
+//use super::piece::*;
 use super::player::*;
 
 const CARDS_PER_ROUND: [u8; 5] = [6, 5, 4, 3, 2];
@@ -180,17 +180,21 @@ impl Game {
             Color::Orange
         ];
 
-        let players = (0..n)
+       let players = (0..n)
             .map(|i| Player {
                 player_type: player_types[i],
                 color: colors[i],
-                pieces_to_place: 4, // FIX 1: 4 Statt 3
+                name: match player_types[i] {
+                    PlayerType::Human => "Wartet...".to_string(),
+                    PlayerType::RandomBot => "Zufalls-Bot".to_string(),
+                    PlayerType::EvalBot => "Schlauer Bot".to_string(),
+                },
+                pieces_to_place: 4, 
                 pieces_in_house: 0,
                 cards: Vec::new(),
             })
             .collect();
 
-        // FIX 1: Board sauber starten, nicht direkt aufs Feld setzen
         let board = Board::new(n);
 
         Self {
@@ -431,20 +435,20 @@ impl Game {
         false
     }
 
-    fn find_team_pieces(&self, player_index: usize) -> Vec<usize> {
-        let controllable_player_indices = self.controllable_player_indices(player_index);
-        let mut positions = Vec::new();
+    //fn find_team_pieces(&self, player_index: usize) -> Vec<usize> {
+   //     let controllable_player_indices = self.controllable_player_indices(player_index);
+     //   let mut positions = Vec::new();
 
-        for (index, tile) in self.board.tiles.iter().enumerate() {
-            if let Some(piece) = tile {
-                if controllable_player_indices.contains(&piece.owner) {
-                    positions.push(index);
-                }
-            }
-        }
+       // for (index, tile) in self.board.tiles.iter().enumerate() {
+         //   if let Some(piece) = tile {
+         //       if controllable_player_indices.contains(&piece.owner) {
+      //              positions.push(index);
+       ///         }
+       //     }
+     //   }
 
-        positions
-    }
+      //  positions
+   // }
 
     fn find_movable_pieces(&self, player_index: usize) -> Vec<usize> {
         let controllable_player_indices = self.controllable_player_indices(player_index);
