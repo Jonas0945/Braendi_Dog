@@ -17,14 +17,12 @@ pub use game::piece::Piece;
 use serde::{Deserialize, Serialize};
 pub use ui::render;
 
-//Aktionen, die Spieler versuchen können
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum ClientNachricht {
-    beitritt,
-    make_play,
-    quit,
+    Beitritt,
+    MakePlay,
+    Quit,
 }
-//informiert Client um Gui zu aktualisieren
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type", content = "data")]
 pub enum ServerNachrich{
