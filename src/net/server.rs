@@ -1,18 +1,23 @@
+// Kommentare bei Jonas
+// Dieses Modul implementiert einen einfachen asynchronen TCP-Server, der
+// mehrere Clients verwaltet und ein Spiel steuert.
+
 use crate::{Color, ServerNachrich};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-//use crate::{BeginGameMesage, Game, DogGame, game::player::{Player, PlayerType}};
-
 use crate::{BeginGameMesage, Game, DogGame, game::player::{ PlayerType}};
 use crate::ai::generator::generate_all_legal_actions;
 use crate::ai::bot::{RandomBot, EvalBot, Bot};
 use tokio::net::tcp::OwnedWriteHalf;
 
+// Eindeutige Kennung für einen client, Bots bekommen hohe IDs damit sie in der logik von Humans unterschieden werden können
 type ClientID = usize;
 const BOT_CLIENT_ID_BASE: usize = usize::MAX / 2;
+
+
 
 pub struct GameServer {
     pub game: Arc<Mutex<Option<Game>>>,
@@ -23,6 +28,9 @@ pub struct GameServer {
 }
 
 impl GameServer {
+    // Erstellt einen frischen Server ohne laufendes Spiel und ohne Clients.
+    // Die Felder werden mit `Arc` und `Mutex` umwickelt, damit sie von mehreren
+    // Tokio-Tasks gleichzeitig sicher genutzt werden können.
     pub fn new() -> Self {
         GameServer {
             game: Arc::new(Mutex::new(None)),
@@ -32,7 +40,11 @@ impl GameServer {
             next_id: Arc::new(AtomicUsize::new(0)),
         }
     }
-
+    // Startet den TCP Server, beinhaltet die Serverlogik
+    //zwei Hauptaufgaben:
+    ///1. accept scleife, die neue Clients Verarbeitet und die Verbindung in clients einträgt
+    /// 2. Game loop, welcher actionqueue abarbeitet und den Zustand samt Bots aktualisiert und broadcastet
+    
     pub async fn start_server(&self, addresse: &str) -> Result<(), Box<dyn std::error::Error>> {
         let listener = TcpListener::bind(addresse).await?;
         println!("Server hier, listner an {:?} gebunden", addresse);
@@ -42,7 +54,7 @@ impl GameServer {
         let client_to_index_ref = self.client_to_index.clone();
         let action_queue_ref = self.action_queue.clone();
         let next_id_ref = self.next_id.clone();
-
+        // erster loop
         tokio::spawn(async move {
             loop {
                 match listener.accept().await {
@@ -65,6 +77,7 @@ impl GameServer {
                             let mut reader = tokio::io::BufReader::new(reader);
                             let mut hello_line = String::new();
 
+                            
                             match reader.read_line(&mut hello_line).await {
                                 Ok(n) if n > 0 => {
                                     println!("Raw line empfangen ({} bytes): {:?}", n, hello_line);
@@ -84,31 +97,34 @@ impl GameServer {
 
                             let (maybe_state_msg, maybe_broadcast_state) = {
                                 let mut game_guard = inner_game_ref.lock().unwrap();
-
+                                //Spiel erstellen oder beitreten
                                 match hello_message {
                                     BeginGameMesage::ErstelleSpiel { variant, player_name, player_types } => {
+                                        
                                         if game_guard.is_none() {
                                             let mut new_game = Game::new(variant, player_types);
                                             new_game.new_round();
                                     
                                             *game_guard = Some(new_game);
 
+                                          
                                             let game = game_guard.as_mut().unwrap();
                                             let mut human_slot_assigned = false;
                                             for (i, player) in game.players.iter_mut().enumerate() {
                                                 match player.player_type {
                                                     PlayerType::Human => {
                                                         if !human_slot_assigned {
-                                                            player.name = player_name.clone();  // ersetzt den get_mut(0)-Block
+                                                            player.name = player_name.clone();  
                                                             inner_client_to_index_ref
                                                                 .lock().unwrap()
                                                                 .insert(netzwerk_id, player.color);
                                                             human_slot_assigned = true;
                                                         } else {
-                                                            player.name = "Wartet...".to_string(); // ← neu
+                                                            player.name = "Wartet...".to_string(); //noch nicht verbundene Spieler
                                                         }
                                                     }
                                                     PlayerType::RandomBot | PlayerType::EvalBot => {
+                                                        
                                                         inner_client_to_index_ref
                                                             .lock().unwrap()
                                                             .insert(BOT_CLIENT_ID_BASE + i, player.color);
@@ -122,6 +138,7 @@ impl GameServer {
                                             return;
                                         }
                                     
+                                        
                                         let msg1 = serde_json::to_string(&ServerNachrich::Welcome(0)).unwrap() + "\n";
                                         let game_clone = game_guard.as_ref().unwrap().clone();
                                         let msg2 = serde_json::to_string(&ServerNachrich::State(game_clone)).unwrap() + "\n";
@@ -129,6 +146,8 @@ impl GameServer {
                                         (Some(msg1 + &msg2), None)
                                     }
                                     BeginGameMesage::SpielBeitreten { player_name } => {
+                                        // Beitritt nur möglich wenn Spiel existiert
+                                        //und ein freier Menschenslot da ist
                                         if let Some(game) = game_guard.as_mut() {
                                             let free_slot = game.players.iter().position(|p| {
                                                 p.player_type == PlayerType::Human && p.name == "Wartet..."
@@ -144,6 +163,7 @@ impl GameServer {
                                                     .insert(netzwerk_id, player.color);
                                                 println!("Client '{}' hat sich angemeldet als Slot {}", player_name, slot);
 
+                                                
                                                 let msg1 = serde_json::to_string(&ServerNachrich::Welcome(slot)).unwrap() + "\n";
                                                 let game_clone = game.clone();
                                                 let msg2 = serde_json::to_string(&ServerNachrich::State(game_clone.clone())).unwrap() + "\n";
@@ -181,6 +201,7 @@ impl GameServer {
                                 }
                             }
 
+                            // Hauptleseschleife für diesen Client. nichtleere Nachrichten werden in die actionqueue hinzugefügt und später abgearbeitet
                             loop {
                                 let mut action_line = String::new();
                                 match reader.read_line(&mut action_line).await {
@@ -195,7 +216,7 @@ impl GameServer {
                                                 .push_back((netzwerk_id, action_str));
                                         }
                                     }
-                                    _ => break,
+                                    _ => break, // Verbindung geschlossen oder Fehler
                                 }
                             }
                         });
@@ -205,13 +226,17 @@ impl GameServer {
             }
         });
 
+        // Klonen der Referenzen damit die schleife auf die gleichen
+        // Strukturen zugreift wie der Listener Task
         let game_loop_game_ref = self.game.clone();
         let game_loop_clients_ref = self.clients.clone();
         let game_loop_queue_ref = self.action_queue.clone();
         let game_loop_clients_to_index_ref = self.client_to_index.clone();
 
+        // game loop, läuft dauerhaft
         tokio::spawn(async move {
             loop {
+                //Warteschlange einsammeln
                 let mut actions: Vec<(usize, String)> = Vec::new();
                 {
                     let mut queue: std::sync::MutexGuard<'_, VecDeque<(usize, String)>> =
@@ -221,11 +246,17 @@ impl GameServer {
                     }
                 }
 
+                // Nachrichten, die später direkt an einzelne Clients geschickt
+                // werden sollen (z.B. Fehlermeldungen).
                 let mut outbox: Vec<(usize, String)> = Vec::new();
                 let mut state_changed = false;
                 
+                // Flag, ob in diesem Loop schon ein menschlicher Spieler
+                // gezogen hat. Wird für Botthreads und die Tick-Pausen
+                // genutzt.
                 let mut human_played_this_tick = false;
 
+                // actions werden verarbeitet
                 if !actions.is_empty() {
                     let mut game_guard = game_loop_game_ref.lock().unwrap();
                     if let Some(game) = game_guard.as_mut() {
@@ -277,10 +308,14 @@ impl GameServer {
 
                 let mut sleep_duration = 0; 
 
+                // Falls in diesem Tick kein Mensch gezogen hat, wird ein Botzug
+                // oder eine Sonderaktion (Undo/Next) ausgeführt.
                 if !human_played_this_tick {
                     let mut force_undo = false;
                     let mut force_next = false;
 
+                    // Zuerst prüfen wir, ob der aktuelle Spieler ein Bot ist und
+                    // ob er überhaupt legale Aktionen hat.
                     {
                         let mut game_guard = game_loop_game_ref.lock().unwrap();
                         if let Some(game) = game_guard.as_mut() {
@@ -300,6 +335,8 @@ impl GameServer {
                     }
 
                     if force_undo {
+                        // Der Bot war im Split gefangen. Wir machen einfach ein
+                        // Undo und werfen die Karte ab, um den Loop zu durchbrechen.
                         let mut game_guard = game_loop_game_ref.lock().unwrap();
                         let game = game_guard.as_mut().unwrap();
                         
@@ -322,6 +359,7 @@ impl GameServer {
                         sleep_duration = 1500;
                         
                     } else if force_next {
+                        // Bot muss passen
                         let mut game_guard = game_loop_game_ref.lock().unwrap();
                         let game = game_guard.as_mut().unwrap();
                         let idx = game.current_player_index;
@@ -342,6 +380,7 @@ impl GameServer {
                         state_changed = true;
                         sleep_duration = 1000;
                     } else {
+                        // Normale Botentscheidung je nach Typ 
                         let bot_action = {
                             let game_clone_opt = {
                                 let guard = game_loop_game_ref.lock().unwrap();
@@ -382,6 +421,7 @@ impl GameServer {
                     }
                 } else {
                    
+                    // Mensch hat gespielt; wir geben ein bisschen mehr Zeit bevor der nächste Tick geprüft wird 
                     let is_trading = game_loop_game_ref.lock().unwrap().as_ref().map(|g| g.trading_phase).unwrap_or(false);
                     if !is_trading {
                         sleep_duration = 600; 
@@ -390,6 +430,8 @@ impl GameServer {
 
                 let mut clients_guard = game_loop_clients_ref.lock().await;
 
+                // Wenn sich der Spielzustand geändert hat, senden wir den
+                // neuen State an *alle* verbundenen Clients.
                 if state_changed {
                     let state_msg = {
                         let game_guard = game_loop_game_ref.lock().unwrap();
@@ -405,6 +447,7 @@ impl GameServer {
                     }
                 }
 
+                // Alle individuellen Fehler-/Informationsnachrichten an Clients
                 for (clientid, message) in outbox {
                     if let Some(writer) = clients_guard.get_mut(&clientid) {
                         let _ = writer.write_all(message.as_bytes()).await;
@@ -414,6 +457,7 @@ impl GameServer {
                 if sleep_duration > 0 {
                     tokio::time::sleep(tokio::time::Duration::from_millis(sleep_duration)).await;
                 }
+                // Kleine Pause am Ende jeder Iteration, um 50ms-Takt zu sichern.
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             }
         });
