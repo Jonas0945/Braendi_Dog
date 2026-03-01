@@ -127,6 +127,8 @@ struct MoveAnimation {
     progress: f32,
     from_zwinger_of_player: Option<usize>,
     is_capture: bool,
+    captured_piece_owner: Option<usize>, 
+    captured_color: IcedColor,           
 }
 #[derive(Debug, Clone)]
 struct Confetti {
@@ -344,13 +346,18 @@ impl Application for DogApp {
                 let mut cmds = Vec::new(); 
                 
                 if let Some(anim) = &mut self.animation {
-                    anim.progress += delta / 0.4;
-                    if anim.progress >= 1.0 {
+                    let old_prog = anim.progress;
+                    anim.progress += delta / 0.6;
+                    
+                    if old_prog < 1.0 && anim.progress >= 1.0 {
                         if anim.is_capture {
                             play_sfx("beat.mp3", 1.0);
                         } else {
                             play_sfx("placing.mp3", 0.4);
                         }
+                    }
+                    
+                    if anim.progress >= 1.4 {
                         self.animation = None;
                         
                         if self.client.is_none() {
@@ -453,7 +460,6 @@ impl Application for DogApp {
             }
             Message::ConfirmBotSetup => {
                 if let Some(kind) = self.selected_variant {
-                    // 1. GameVariant aus dem UI-Zustand bauen
                     let variant = match kind {
                         GameVariantKind::TwoVsTwo => GameVariant::TwoVsTwo,
                         GameVariantKind::ThreeVsThree => GameVariant::ThreeVsThree,
@@ -467,15 +473,12 @@ impl Application for DogApp {
                     let p_types = self.player_types.clone();
 
                     if self.hosting {
-                        // Host-Modus: Server starten
                         let addr = self.bind_addr_input.clone();
                         return Command::perform(start_server(addr), Message::ServerStarted);
                     } else {
-                        // LOKALER MODUS
                         let mut game = Game::new(variant, p_types);
                         game.new_round();
 
-                        // Namen für lokale Menschen setzen
                         for (i, p) in game.players.iter_mut().enumerate() {
                             if p.player_type == PlayerType::Human {
                                 if i == 0 {
@@ -486,12 +489,10 @@ impl Application for DogApp {
                             }
                         }
 
-                        // Kamera auf den ersten Spieler (0) fixieren
                         self.local_player_index = Some(0);
                         self.game = Some(game);
                         self.screen = Screen::Game;
-
-                        // Falls der erste Spieler ein Bot ist, direkt triggern
+                        self.msg = "Wähle eine Karte!!!".to_string();
                         if self.game.as_ref().unwrap().players[0].player_type != PlayerType::Human {
                             return Command::perform(async {}, |_| Message::TriggerLocalBot);
                         }
@@ -766,6 +767,21 @@ impl Application for DogApp {
 
                                         let is_capture = last_entry.beaten_piece_owner.is_some();
 
+                                        let mut captured_owner = None;
+                                        let mut captured_color = IcedColor::WHITE;
+
+                                        if let Some(beaten) = last_entry.beaten_piece_owner {
+                                            captured_owner = Some(beaten);
+                                            captured_color = match new_game.players[beaten].color {
+                                                GameColor::Red => IcedColor::from_rgb(0.8, 0.2, 0.2),
+                                                GameColor::Green => IcedColor::from_rgb(0.2, 0.8, 0.2),
+                                                GameColor::Blue => IcedColor::from_rgb(0.2, 0.2, 0.8),
+                                                GameColor::Yellow => IcedColor::from_rgb(0.8, 0.8, 0.2),
+                                                GameColor::Purple => IcedColor::from_rgb(0.5, 0.0, 0.5),
+                                                GameColor::Orange => IcedColor::from_rgb(1.0, 0.65, 0.0),
+                                            };
+                                        }
+
                                         self.animation = Some(MoveAnimation {
                                             from: from_idx,
                                             to: to_idx,
@@ -773,6 +789,8 @@ impl Application for DogApp {
                                             progress: 0.0,
                                             from_zwinger_of_player: from_zwinger,
                                             is_capture, 
+                                            captured_piece_owner: captured_owner,
+                                            captured_color,
                                         });
                                         self.last_tick = Instant::now();
                                     }
@@ -1301,7 +1319,41 @@ impl DogApp {
     }
 
     fn render_rules(&self) -> Element<'_, Message> {
-        let rules_text_content = "Viel Text ..."; // BITTE WIEDER REGELN EINFÜGEN!
+        let rules_text_content = r#"ZIEL DES SPIELS
+Brändi Dog ist ein Teamspiel (außer im Free-for-All Modus). Ziel ist es, alle eigenen vier Murmeln vom Zwinger über den Rundkurs ins Ziel (Haus) zu bringen. Sobald ein Spieler alle Murmeln im Haus hat, hilft er mit seinen Karten seinem Teampartner. Das Team, das zuerst alle 8 Murmeln im Haus hat, gewinnt.
+
+BEDIENUNG DER OBERFLÄCHE (WICHTIG!)
+Die Steuerung erfolgt immer in dieser Reihenfolge:
+1. KARTE WÄHLEN: Klicke unten auf eine Karte in deiner Hand.
+2. AKTION WÄHLEN: Wähle rechts im Menü aus, was du tun möchtest (z. B. "Ziehen", "Legen", "Tauschen").
+3. FIGUR WÄHLEN: Klicke auf dem Brett auf die Figur, die die Aktion ausführen soll (und danach ggf. auf das Zielfeld).
+- Tipp: Oben rechts steht immer, was das Spiel gerade von dir erwartet! Hast du dich verklickt, drücke rechts auf "Abbrechen" oder "Undo".
+
+SPIELABLAUF & KARTENTAUSCH
+Das Spiel geht über mehrere Runden. In Runde 1 bekommt jeder 6 Karten, dann 5, 4, 3, 2. Danach geht es wieder bei 6 los.
+- Zu Beginn JEDER Runde tauschen Teampartner verdeckt eine Karte aus (Aktion: "Handel (Trade)"). 
+- Im Free-for-All (Jeder gegen Jeden) wird stattdessen vom rechten Nachbarn blind eine Karte gezogen ("Tausch-Klau").
+
+ZUGZWANG
+Es herrscht absoluter Zugzwang! Wenn du eine Karte spielen KANNST, MUSST du sie spielen. Auch wenn es zu deinem Nachteil ist (z. B. am eigenen Haus vorbeilaufen). 
+Kannst du keinen gültigen Zug machen, musst du die Runde aussetzen und eine Karte abwerfen (Aktion: "Abwerfen (Remove)").
+
+DIE KARTENWERTE
+• ASS (A): Eine Figur aus dem Zwinger auf das Startfeld setzen (Legen) ODER 1 Feld ODER 11 Felder vorrücken.
+• KÖNIG (K): Eine Figur auf das Startfeld setzen ODER 13 Felder vorrücken.
+• DAME (Q): 12 Felder vorrücken.
+• BUBE (J): Eine eigene Figur mit einer beliebigen anderen Figur auf dem Kurs tauschen (Interchange). Figuren auf Startfeldern oder im Haus dürfen nicht getauscht werden!
+• 10, 9, 8, 6, 5, 3: Entsprechend viele Felder vorwärts ziehen.
+• 4: Genau 4 Felder VORWÄRTS oder RÜCKWÄRTS ziehen. (Rückwärts direkt ins Haus ist nicht erlaubt, man muss den Kurs erst umrunden).
+• 7: Die 7 Felder können auf beliebig viele eigene (oder Team-) Figuren aufgeteilt werden (Split-Aktion). Jede fremde Figur, die bei einem Teilschritt der 7 überholt wird, wird geschlagen!
+• 2: 2 Felder vorrücken. (Im Free-for-All Modus kann man mit der 2 auch eine Karte von einem Gegner klauen: Aktion "Grab").
+• JOKER: Nimmt den Wert einer beliebigen anderen Karte an.
+
+SONDERREGELN AUF DEM BRETT
+• DAS STARTFELD: Wer aus dem Zwinger kommt, ist auf dem Startfeld geschützt (Blockiert). Er kann weder geschlagen, getauscht noch überholt werden (auch nicht von eigenen Figuren!). Das Startfeld muss so schnell wie möglich geräumt werden.
+• SCHLAGEN: Landet eine Figur genau auf einem Feld, das bereits besetzt ist, wird die dortige Figur geschlagen und muss zurück in den Zwinger.
+• DAS HAUS: Um ins Haus zu gelangen, muss das Startfeld mindestens einmal überquert worden sein. Man muss passend ins Haus einziehen. Im Haus darf nicht übersprungen werden.
+"#;
         container(
             container(
                 column![
@@ -1334,7 +1386,8 @@ impl DogApp {
                 ]
                 .padding(40),
             )
-            .width(Length::Fixed(850.0))
+            // Zurück auf die originale, stabile Breite!
+            .width(Length::Fixed(850.0)) 
             .height(Length::FillPortion(8))
             .style(|_: &Theme| container::Appearance {
                 background: Some(iced::Background::Color(IcedColor::from_rgba(
@@ -2115,6 +2168,23 @@ impl DogApp {
                         if is_move {
                             let is_capture = game.history.last().map_or(false, |e| e.beaten_piece_owner.is_some());
                             
+                            let mut captured_owner = None;
+                            let mut captured_color = IcedColor::WHITE;
+                            
+                            if let Some(last_entry) = game.history.last() {
+                                if let Some(beaten) = last_entry.beaten_piece_owner {
+                                    captured_owner = Some(beaten);
+                                    captured_color = match game.players[beaten].color {
+                                        GameColor::Red => IcedColor::from_rgb(0.8, 0.2, 0.2),
+                                        GameColor::Green => IcedColor::from_rgb(0.2, 0.8, 0.2),
+                                        GameColor::Blue => IcedColor::from_rgb(0.2, 0.2, 0.8),
+                                        GameColor::Yellow => IcedColor::from_rgb(0.8, 0.8, 0.2),
+                                        GameColor::Purple => IcedColor::from_rgb(0.5, 0.0, 0.5),
+                                        GameColor::Orange => IcedColor::from_rgb(1.0, 0.65, 0.0),
+                                    };
+                                }
+                            }
+
                             self.animation = Some(MoveAnimation {
                                 from: from_idx,
                                 to: to_idx,
@@ -2122,6 +2192,9 @@ impl DogApp {
                                 progress: 0.0,
                                 from_zwinger_of_player: from_zwinger,
                                 is_capture,
+                                // NEUE FELDER HIER:
+                                captured_piece_owner: captured_owner,
+                                captured_color,
                             });
                             self.last_tick = Instant::now();
                         } else {
@@ -2557,7 +2630,7 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
             }
         }
 
-        for p_idx in 0..total_players {
+for p_idx in 0..total_players {
             let player = &self.game.players[p_idx];
             let count = player.pieces_to_place;
             if count > 0 {
@@ -2573,21 +2646,29 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
                     * (std::f32::consts::TAU / (ring_size as f32))
                     + rotation;
                 for k in 0..count {
-                    let offset_angle = start_angle + 0.12 - (k as f32 * 0.08);
-                    let wait_pos = Point::new(
-                        center.x + 295.0 * scale * offset_angle.cos(),
-                        center.y + 295.0 * scale * offset_angle.sin(),
-                    );
-                    frame.fill(
-                        &canvas::Path::circle(wait_pos, 6.0 * scale),
-                        IcedColor::from_rgba(0.0, 0.0, 0.0, 0.1),
-                    );
-                    draw_marble(&mut frame, wait_pos, p_color, scale);
+                    let mut skip_draw = false;
+                    if let Some(anim) = &self.animation {
+                        if anim.captured_piece_owner == Some(p_idx) && k == count - 1 && anim.progress < 1.4 {
+                            skip_draw = true;
+                        }
+                    }
+
+                    if !skip_draw {
+                        let offset_angle = start_angle + 0.12 - (k as f32 * 0.08);
+                        let wait_pos = Point::new(
+                            center.x + 295.0 * scale * offset_angle.cos(),
+                            center.y + 295.0 * scale * offset_angle.sin(),
+                        );
+                        frame.fill(
+                            &canvas::Path::circle(wait_pos, 6.0 * scale),
+                            IcedColor::from_rgba(0.0, 0.0, 0.0, 0.1),
+                        );
+                        draw_marble(&mut frame, wait_pos, p_color, scale);
+                    }
                 }
             }
         }
-
-        if let Some(anim) = &self.animation {
+if let Some(anim) = &self.animation {
             let p1 = if let Some(p_idx) = anim.from_zwinger_of_player {
                 let count = self.game.players[p_idx].pieces_to_place;
                 let offset_angle = ((self.game.board.start_field(p_idx) as f32)
@@ -2603,20 +2684,65 @@ impl<'a> canvas::Program<Message> for BoardView<'a> {
                 get_tile_position(anim.from, total_players, center, scale, rotation)
             };
             let p2 = get_tile_position(anim.to, total_players, center, scale, rotation);
-            let  x = p1.x + (p2.x - p1.x) * anim.progress;
-            let mut y = p1.y + (p2.y - p1.y) * anim.progress;
-            let hop = (1.0 - (2.0 * anim.progress - 1.0).powi(2)) * 80.0 * scale;
-            y -= hop;
-            frame.fill(
-                &canvas::Path::circle(
-                    Point::new(x, p1.y + (p2.y - p1.y) * anim.progress + 5.0 * scale),
-                    10.0 * scale,
-                ),
-                IcedColor::from_rgba(0.0, 0.0, 0.0, 0.3 * (1.0 - (hop / (80.0 * scale)) * 0.7)),
-            );
-            draw_marble(&mut frame, Point::new(x, y), anim.color, scale);
-        }
+            
+            if let Some(owner) = anim.captured_piece_owner {
+                let cap_prog = ((anim.progress - 0.8) / 0.6).clamp(0.0, 1.0);
+                
+                if cap_prog > 0.0 && cap_prog < 1.0 {
+                    let count = self.game.players[owner].pieces_to_place.max(1);
+                    let k = count - 1;
+                    let start_angle = (self.game.board.start_field(owner) as f32)
+                        * (std::f32::consts::TAU / (ring_size as f32))
+                        + rotation;
+                    let offset_angle = start_angle + 0.12 - (k as f32 * 0.08);
+                    let wait_pos = Point::new(
+                        center.x + 295.0 * scale * offset_angle.cos(),
+                        center.y + 295.0 * scale * offset_angle.sin(),
+                    );
 
+                    let x = p2.x + (wait_pos.x - p2.x) * cap_prog;
+                    let mut y = p2.y + (wait_pos.y - p2.y) * cap_prog;
+                    let hop = (1.0 - (2.0 * cap_prog - 1.0).powi(2)) * 150.0 * scale; 
+                    y -= hop;
+
+                    frame.fill(
+                        &canvas::Path::circle(
+                            Point::new(x, p2.y + (wait_pos.y - p2.y) * cap_prog + 5.0 * scale),
+                            10.0 * scale,
+                        ),
+                        IcedColor::from_rgba(0.0, 0.0, 0.0, 0.3 * (1.0 - (hop / (150.0 * scale)) * 0.7)),
+                    );
+                    draw_marble(&mut frame, Point::new(x, y), anim.captured_color, scale);
+                } else if anim.progress <= 0.8 {
+                    draw_marble(&mut frame, p2, anim.captured_color, scale);
+                }
+            }
+
+            if anim.progress < 0.4 {
+                draw_dust(&mut frame, p1, scale, anim.progress / 0.4, IcedColor::WHITE);
+            }
+
+            let visual_progress = anim.progress.clamp(0.0, 1.0);
+            if visual_progress < 1.0 {
+                let x = p1.x + (p2.x - p1.x) * visual_progress;
+                let mut y = p1.y + (p2.y - p1.y) * visual_progress;
+                let hop = (1.0 - (2.0 * visual_progress - 1.0).powi(2)) * 80.0 * scale;
+                y -= hop;
+                
+                frame.fill(
+                    &canvas::Path::circle(
+                        Point::new(x, p1.y + (p2.y - p1.y) * visual_progress + 5.0 * scale),
+                        10.0 * scale,
+                    ),
+                    IcedColor::from_rgba(0.0, 0.0, 0.0, 0.3 * (1.0 - (hop / (80.0 * scale)) * 0.7)),
+                );
+                draw_marble(&mut frame, Point::new(x, y), anim.color, scale);
+            }
+
+            if anim.progress > 1.0 && anim.progress < 1.4 {
+                draw_dust(&mut frame, p2, scale, (anim.progress - 1.0) / 0.4, IcedColor::WHITE);
+            }
+        }
         vec![frame.into_geometry()]
     }
 }
@@ -3081,6 +3207,26 @@ fn draw_marble(frame: &mut canvas::Frame, center: Point, color: IcedColor, scale
         ),
         IcedColor::from_rgba(1.0, 1.0, 1.0, 0.4),
     );
+}
+
+fn draw_dust(frame: &mut canvas::Frame, center: Point, scale: f32, time: f32, color: IcedColor) {
+    if time <= 0.0 || time >= 1.0 { return; }
+    let num_particles = 12; 
+    let radius = 8.0 * scale * (1.0 - time); 
+    let max_spread = 45.0 * scale; 
+    let spread = time * max_spread; 
+    
+    for i in 0..num_particles {
+        let angle = (i as f32 / num_particles as f32) * std::f32::consts::TAU + (time * 1.5); 
+        let px = center.x + angle.cos() * spread;
+        let py = center.y + angle.sin() * spread;
+        let alpha = 0.8 * (1.0 - time); 
+        
+        frame.fill(
+            &canvas::Path::circle(Point::new(px, py), radius),
+            IcedColor::from_rgba(color.r, color.g, color.b, alpha)
+        );
+    }
 }
 
 fn play_sfx(filename: &'static str, volume: f32) {
