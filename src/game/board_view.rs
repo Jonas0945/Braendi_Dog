@@ -1,4 +1,4 @@
-use crate::game::{Game};
+use crate::game::Game;
 
 /// Comments by Sebastian Servos
 /// This module defines the BoardPieceInfo struct and the collect_board_pieces function, which are used to gather information about the pieces currently on the board.
@@ -11,7 +11,8 @@ pub struct BoardPieceInfo {
 }
 
 pub fn collect_board_pieces(game: &Game) -> Vec<BoardPieceInfo> {
-    game.board.tiles
+    game.board
+        .tiles
         .iter()
         .enumerate()
         .filter_map(|(position, tile)| {

@@ -43,7 +43,6 @@ pub enum ActionKind {
         target_card: usize,
     },
     Undo,
-    
 }
 
 impl FromStr for Action {

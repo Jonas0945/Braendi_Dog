@@ -27,8 +27,7 @@ impl Deck {
         use Card::*;
 
         let ranks = [
-            Ace, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten,
-            Jack, Queen, King,
+            Ace, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten, Jack, Queen, King,
         ];
 
         let mut deck = Vec::new();
@@ -43,7 +42,7 @@ impl Deck {
         deck
     }
 
-    pub fn draw(& mut self) -> Option<Card> {
+    pub fn draw(&mut self) -> Option<Card> {
         self.cards.pop()
     }
 
@@ -84,8 +83,7 @@ mod tests {
         assert_eq!(deck.len(), 54);
 
         let ranks = [
-            Ace, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten,
-            Jack, Queen, King,
+            Ace, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten, Jack, Queen, King,
         ];
 
         for r in ranks {
@@ -129,7 +127,9 @@ mod tests {
         deck.shuffle();
         let after = deck.clone();
 
-        assert_ne!(before, after, "Shuffle should probably change order sometimes");
+        assert_ne!(
+            before, after,
+            "Shuffle should probably change order sometimes"
+        );
     }
-
 }

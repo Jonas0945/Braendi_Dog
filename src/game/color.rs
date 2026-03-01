@@ -1,5 +1,5 @@
+use serde::{Deserialize, Serialize};
 use std::fmt::Display;
-use serde::{Serialize, Deserialize};
 
 /// Comments by Sebastian Servos
 /// This module defines the Color enum, which represents the different player colors in the game.
@@ -27,4 +27,3 @@ impl Display for Color {
         write!(f, "{}", color_str)
     }
 }
-

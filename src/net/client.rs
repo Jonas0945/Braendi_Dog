@@ -1,7 +1,9 @@
-use crate::game::{Game, GameVariant, };
-use crate::game::player::PlayerType;
+//Kommentare by Jonas
+// Einfacher TCP-Client für das Spiel.
 
-use crate::{BeginGameMesage};
+use crate::BeginGameMesage;
+use crate::game::player::PlayerType;
+use crate::game::{Game, GameVariant};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -27,6 +29,9 @@ impl Client {
         }
     }
 
+    /// Hilfsmethode, die nur einen nackten `TcpStream` zurückgibt. Wird
+    /// beim Einrichtungsdialog verwendet, falls man erst entscheiden möchte,
+    /// ob man ein neues Spiel erstellt oder einem beitritt.
     pub async fn verbinde_client(addr: &str) -> tokio::io::Result<TcpStream> {
         println!("Versuche mit {} zu verbinden", addr);
         let socket = TcpStream::connect(addr).await?;
@@ -34,6 +39,7 @@ impl Client {
         Ok(socket)
     }
 
+    /// Sendet einen json zug an den Server
     pub async fn make_play(&mut self, play: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut play_json = serde_json::to_vec(&play).unwrap();
         play_json.push(b'\n'); // terminator
@@ -52,7 +58,7 @@ pub async fn starte_client(server_adresse: &str) -> Result<TcpStream, Box<dyn st
     socket.write_all(&json_bytes).await?;
     Ok(socket)
 }
-
+//Verbinded sich und sendet SPielBeitreten, gibt Client zurück, der Züge verschicken und Nachrichten empfangen kann
 pub async fn join_running_game(
     server_adresse: &str,
     player_name: String,
@@ -73,6 +79,8 @@ pub async fn join_running_game(
     })
 }
 
+//Verbindet sich mit dem Server und fordert die Erstellung eines neuen
+// Spiels mit den übergebenen Spielern an.
 pub async fn create_game(
     server_adresse: &str,
     player_name: String,

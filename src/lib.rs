@@ -1,15 +1,15 @@
 pub mod ai;
 pub mod game;
+pub mod gui;
 pub mod net;
 pub mod ui;
-pub mod gui;
-pub use net::*;
 pub use game::action::{Action, ActionKind};
 pub use game::card::Card;
 pub use game::color::Color;
 pub use game::game::GameVariant;
 pub use game::game::{DogGame, Game};
 pub use game::piece::Piece;
+pub use net::*;
 use serde::{Deserialize, Serialize};
 pub use ui::render;
 
@@ -21,10 +21,10 @@ pub enum ClientNachricht {
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type", content = "data")]
-pub enum ServerNachrich{
+pub enum ServerNachrich {
     Fehler(String),
     State(Game),
-    Welcome(usize), 
+    Welcome(usize),
 }
 
 #[derive(Serialize, Deserialize, Debug)]

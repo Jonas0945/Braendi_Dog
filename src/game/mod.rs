@@ -1,15 +1,15 @@
-pub mod card;
-pub mod deck;
+pub mod action;
 pub mod board;
 pub mod board_view;
-pub mod game;
-pub mod action;
+pub mod card;
 pub mod color;
+pub mod deck;
+pub mod game;
+pub mod history;
 pub mod piece;
 pub mod player;
-pub mod history;
 
-pub use game::{Game, DogGame};
-pub use color::Color;
-pub use piece::Piece;
 pub use self::game::*;
+pub use color::Color;
+pub use game::{DogGame, Game};
+pub use piece::Piece;

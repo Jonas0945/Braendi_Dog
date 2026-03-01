@@ -27,5 +27,3 @@ pub struct HistoryEntry {
     pub grabbed_card: Option<Card>,
     pub grabbed_card_index: Option<usize>,
 }
-
-
