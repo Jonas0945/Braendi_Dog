@@ -1312,7 +1312,7 @@ impl DogApp {
         })
         .into()
     }
-
+//Regeln wurden mit KI geschrieben 
     fn render_rules(&self) -> Element<'_, Message> {
         let rules_text_content = r#"ZIEL DES SPIELS
 Brändi Dog ist ein Teamspiel (außer im Free-for-All Modus). Ziel ist es, alle eigenen vier Murmeln vom Zwinger über den Rundkurs ins Ziel (Haus) zu bringen. Sobald ein Spieler alle Murmeln im Haus hat, hilft er mit seinen Karten seinem Teampartner. Das Team, das zuerst alle 8 Murmeln im Haus hat, gewinnt.
