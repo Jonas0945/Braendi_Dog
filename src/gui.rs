@@ -302,7 +302,7 @@ impl Application for DogApp {
                         loop {
                             line.clear();
                             match buf_reader.read_line(&mut line).await {
-                                Ok(0) => break, // EOF
+                                Ok(0) => break, 
                                 Ok(_) => {
                                     let trimmed = line.trim();
                                     if trimmed.is_empty() {
@@ -440,14 +440,12 @@ impl Application for DogApp {
             }
             Message::GoToBotSetup => {
                 if let Some(variant) = self.build_game_variant() {
-                    // Anzahl Spieler bestimmen
                     let count = match variant {
                         GameVariant::TwoVsTwo => 4,
                         GameVariant::ThreeVsThree => 6,
                         GameVariant::TwoVsTwoVsTwo => 6,
                         GameVariant::FreeForAll(n) => n,
                     };
-                    // Alle als Human vorbelegen
                     self.player_types = vec![PlayerType::Human; count];
                     self.hosting = false;
                     self.screen = Screen::BotSetup;
@@ -660,7 +658,6 @@ impl Application for DogApp {
                 }
             }
             Message::ServerStarted(Ok(addr)) => {
-                // tell the user where the server is bound so they can share it
                 self.msg = format!("Server läuft unter {}", addr);
                 let name = self.player_name_input.clone();
                 let variant = self.build_game_variant().unwrap();
@@ -709,12 +706,10 @@ impl Application for DogApp {
             Message::IncomingNetwork(net_msg) => {
                 match net_msg {
                     braendi_dog::ServerNachrich::Welcome(idx) => {
-                        // FIX: Server verrät uns unsere Farbe!
                         self.local_player_index = Some(idx);
                         self.msg = format!("Verbunden! Du bist Spieler {}.", idx);
                     }
                     braendi_dog::ServerNachrich::State(new_game) => {
-                        // NEU: Animation triggern, wenn eine neue Aktion in der History ist!
                         if let Some(old_game) = &self.game {
                             if new_game.history.len() > old_game.history.len() {
                                 if let Some(last_entry) = new_game.history.last() {
@@ -1386,7 +1381,6 @@ SONDERREGELN AUF DEM BRETT
                 ]
                 .padding(40),
             )
-            // Zurück auf die originale, stabile Breite!
             .width(Length::Fixed(850.0)) 
             .height(Length::FillPortion(8))
             .style(|_: &Theme| container::Appearance {
@@ -1663,7 +1657,7 @@ SONDERREGELN AUF DEM BRETT
 
     fn make_lobby_screen(&self, game: &Game, scale: f32) -> Element<'_, Message> {
         let mut content = column![
-            text("Lobby") // <-- Geändert!
+            text("Lobby") 
                 .size(40.0 * scale)
                 .style(IcedColor::WHITE),
             text("Warte auf Mitspieler...")
@@ -1676,7 +1670,6 @@ SONDERREGELN AUF DEM BRETT
 
         for (i, p) in game.players.iter().enumerate() {
             
-            // Status-Element zusammenbauen
             let status_element: Element<Message> = if p.player_type != PlayerType::Human {
                 row![text("Bot (Bereit)").size(20.0 * scale).style(IcedColor::from_rgb(0.8, 0.8, 0.8))].into()
             } else if p.name == "Wartet..." {
@@ -1700,21 +1693,17 @@ SONDERREGELN AUF DEM BRETT
                 GameColor::Orange => IcedColor::from_rgb(1.0, 0.7, 0.3),
             };
 
-            // NEU: Alles in feste Boxen gesperrt für eine perfekte Ausrichtung!
             content = content.push(
                 row![
-                    // Slot: Rechtsbündig, feste Breite 80
                     container(text(format!("Slot {}:", i + 1)).size(24.0 * scale).style(IcedColor::WHITE))
                         .width(Length::Fixed(80.0 * scale))
                         .align_x(iced::alignment::Horizontal::Right),
                     
                     iced::widget::Space::with_width(Length::Fixed(20.0 * scale)),
                     
-                    // Name: Linksbündig, feste Breite 180
                     container(text(&p.name).size(24.0 * scale).style(name_color))
                         .width(Length::Fixed(180.0 * scale)),
                     
-                    // Status: Feste Breite 180
                     container(status_element)
                         .width(Length::Fixed(180.0 * scale)),
                 ]
@@ -2758,7 +2747,6 @@ impl<'a> HandView<'a> {
         bounds: iced::Rectangle,
         cursor_position: Point,
     ) -> Vec<(usize, Card, iced::Rectangle, bool)> {
-        // FIX: Wir holen uns jetzt DEINE Handkarten, egal wer am Zug ist!
         let cards = &self.game.players[self.my_idx].cards;
 
         let count = cards.len();
@@ -3264,17 +3252,15 @@ struct HourglassSpinner {
 impl canvas::Program<Message> for HourglassSpinner {
     type State = ();
 
-    // NEU: Die Parameter genau so angeben, wie die neue Iced-Version es verlangt!
     fn draw(
         &self,
         _state: &Self::State,
-        renderer: &iced::Renderer, // <-- Neu
-        _theme: &iced::Theme,      // <-- Neu
+        renderer: &iced::Renderer, 
+        _theme: &iced::Theme,      
         bounds: iced::Rectangle,
-        _cursor: iced::mouse::Cursor, // <-- Geändert
+        _cursor: iced::mouse::Cursor, 
     ) -> Vec<canvas::Geometry> {
         
-        // NEU: Frame::new braucht jetzt auch den renderer als erstes Argument
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         
         let center = frame.center();
