@@ -4,7 +4,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-//use crate::{BeginGameMesage, Game, DogGame, game::player::{Player, PlayerType}};
 
 use crate::{BeginGameMesage, Game, DogGame, game::player::{ PlayerType}};
 use crate::ai::generator::generate_all_legal_actions;

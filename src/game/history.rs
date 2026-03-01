@@ -2,8 +2,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::game::card::Card;
 use super::action::*;
-#[derive(Clone, Debug, Serialize, Deserialize)]
 
+/// Comments by Sebastian Servos
+/// This module defines the HistoryEntry struct, which represents a single entry in the game's history log. 
+/// Each entry contains detailed information about the action taken, the state of the game before the action, and any relevant changes to the game state (such as pieces beaten, cards played, etc.). 
+/// This allows for undoing actions and turns by restoring the game state based on these history entries.
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HistoryEntry {
     pub action: Action,
     pub played_card_index: Option<usize>,

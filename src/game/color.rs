@@ -1,6 +1,9 @@
 use std::fmt::Display;
 use serde::{Serialize, Deserialize};
 
+/// Comments by Sebastian Servos
+/// This module defines the Color enum, which represents the different player colors in the game.
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Color {
     Red,

@@ -1,19 +1,19 @@
 use serde::{Deserialize, Serialize};
-
-/// Pro Spieler werden 16 Felder ausgehend vom Start bis zum nächsten Startfeld kalkuliert
-/// Die Ringgröße entscheidet über die Position der HOUSE_TILES, statt sie fest als Konstante zu schreiben.
-
-
 use super::piece::Piece;
 
-pub type Point = usize; // 0–79
+/// Comments by Sebastian Servos
+/// This module defines the Board struct, which represents the game board and contains methods for checking tile occupancy, calculating distances between tiles, and determining valid moves.
+
+/// For each player, 16 tiles are calculated from the start up to the next start field.
+/// The ring size determines the position of HOUSE_TILES instead of using a fixed constant.
+pub type Point = usize;
 pub const HOUSE_SIZE: usize = 4;
 pub const SEGMENT_LENGTH: usize = 16;
-#[derive(Clone, Debug, Serialize, Deserialize)]
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Board {
     pub tiles: Vec<Option<Piece>>,
-    pub ring_size: usize,
+    pub ring_size: usize, 
 }
 
 impl Board {
@@ -35,6 +35,7 @@ impl Board {
         self.tiles[p]
     }
 
+    // Returns the starting field index for the given player index.
     pub fn start_field(&self,player_index: usize) -> Point {
         player_index * 16
     }
@@ -43,6 +44,7 @@ impl Board {
         self.tiles[p].is_some()
     }
 
+    // A tile is blocked if it is occupied by a piece that has not yet left the starting position.
     pub fn is_blocked (&self, p: Point) -> bool {
         matches!(
             self.tiles[p],
@@ -50,6 +52,7 @@ impl Board {
         )
     }
 
+    // Returns the first tile of the player's house, which is the gateway to the house area.
     pub fn house_gateway(&self, player_index: usize) -> Point {
         self.ring_size + player_index * HOUSE_SIZE
     }
@@ -230,6 +233,7 @@ impl Board {
         options
     }
 
+    // Calculates the maximum number of steps a piece can move from a given position, considering both ring and house paths, and only counting paths that are free of blocking pieces.
     pub fn max_path_from(&self, from: usize, controllable_indices: &[usize]) -> u8 {
         let piece = match &self.tiles[from] {
             Some(p) => p,

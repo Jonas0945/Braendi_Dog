@@ -1,5 +1,9 @@
 use serde::{Serialize, Deserialize};
 
+/// Comments by Sebastian Servos
+/// This module defines the Card enum, which represents the different types of cards in the game.
+/// Each card has specific properties and behaviors, such as possible movement distances, whether it can be used for placing pieces, moving pieces forward or backward, interchanging pieces, etc.
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Card {
     Ace, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten,
